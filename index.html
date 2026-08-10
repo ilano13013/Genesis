@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Genesis — simulation d'un écosystème vivant : évolution, génétique, terrain procédural, saisons et météo dynamique.">
+<meta name="theme-color" content="#070b12">
+<title>Genesis — Écosystème vivant</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>">
+<link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+
+<canvas id="view" aria-label="Vue de l'écosystème"></canvas>
+
+<!-- ─────────────────────────────── barre supérieure ─────────────────────── -->
+<header class="topbar glass" id="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div class="brand-text">
+      <h1>GENESIS</h1>
+      <p>écosystème vivant</p>
+    </div>
+  </div>
+
+  <div class="world-chips" id="worldChips">
+    <div class="chip" id="chipTime" title="Temps écoulé dans la simulation">
+      <span class="chip-icon">🕓</span><span class="chip-value">J0 00:00</span>
+    </div>
+    <div class="chip" id="chipSeason" title="Saison en cours">
+      <span class="chip-icon">🌱</span><span class="chip-value">Printemps</span>
+    </div>
+    <div class="chip" id="chipWeather" title="Météo en cours">
+      <span class="chip-icon">☀️</span><span class="chip-value">Ciel dégagé</span>
+    </div>
+    <div class="chip" id="chipTemp" title="Température relative">
+      <span class="chip-icon">🌡️</span><span class="chip-value">—</span>
+    </div>
+    <div class="chip" id="chipLight" title="Luminosité (cycle jour/nuit)">
+      <span class="chip-icon">☀</span><span class="chip-value">—</span>
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <div class="perf" id="perf" title="Images par seconde / vitesse effective">
+      <span class="perf-fps">60</span><span class="perf-unit">FPS</span>
+      <span class="perf-sep"></span>
+      <span class="perf-speed">×1</span>
+    </div>
+    <button class="icon-btn" id="btnTogglePanels" title="Masquer/afficher les panneaux (Tab)" aria-label="Basculer les panneaux">◧</button>
+  </div>
+</header>
+
+<!-- ─────────────────────────────── panneau statistiques ─────────────────── -->
+<aside class="panel panel-left glass" id="panelStats">
+  <div class="panel-head">
+    <h2>Statistiques</h2>
+    <button class="icon-btn small" data-collapse="panelStats" title="Réduire">−</button>
+  </div>
+
+  <div class="panel-body">
+    <div class="stat-grid">
+      <div class="stat" id="statPopulation">
+        <span class="stat-label">Population</span>
+        <span class="stat-value">0</span>
+        <span class="stat-trend"></span>
+      </div>
+      <div class="stat" id="statSpecies">
+        <span class="stat-label">Espèces</span>
+        <span class="stat-value">0</span>
+        <span class="stat-trend"></span>
+      </div>
+      <div class="stat" id="statAge">
+        <span class="stat-label">Âge moyen</span>
+        <span class="stat-value">0</span>
+        <span class="stat-trend">s</span>
+      </div>
+      <div class="stat" id="statBiomass">
+        <span class="stat-label">Ressources</span>
+        <span class="stat-value">0</span>
+        <span class="stat-trend">unités</span>
+      </div>
+    </div>
+
+    <section class="block">
+      <h3>Population <em>(600 dernières mesures)</em></h3>
+      <canvas class="chart" id="chartPopulation" height="96"></canvas>
+      <div class="legend">
+        <span><i class="dot" style="--c:#7ef0a0"></i>Herbivores</span>
+        <span><i class="dot" style="--c:#ff8f6b"></i>Carnivores</span>
+        <span><i class="dot" style="--c:#8fd0ff"></i>Total</span>
+      </div>
+    </section>
+
+    <section class="block">
+      <h3>Ressources végétales</h3>
+      <canvas class="chart" id="chartBiomass" height="64"></canvas>
+    </section>
+
+    <section class="block">
+      <h3>Régimes alimentaires</h3>
+      <div class="bars" id="dietBars">
+        <div class="bar-row"><span>Herbivores</span><div class="bar"><i style="--c:#7ef0a0"></i></div><b>0</b></div>
+        <div class="bar-row"><span>Omnivores</span><div class="bar"><i style="--c:#ffd06e"></i></div><b>0</b></div>
+        <div class="bar-row"><span>Carnivores</span><div class="bar"><i style="--c:#ff8f6b"></i></div><b>0</b></div>
+      </div>
+    </section>
+
+    <section class="block">
+      <h3>Génome moyen de la population</h3>
+      <div class="bars" id="traitBars"></div>
+    </section>
+
+    <section class="block">
+      <h3>Dynamique</h3>
+      <ul class="kv" id="dynamicsList">
+        <li><span>Naissances / min</span><b data-k="births">0</b></li>
+        <li><span>Décès / min</span><b data-k="deaths">0</b></li>
+        <li><span>Génération max</span><b data-k="generation">0</b></li>
+        <li><span>Doyen</span><b data-k="oldest">0 s</b></li>
+        <li><span>Famine</span><b data-k="famine">0</b></li>
+        <li><span>Prédation</span><b data-k="predation">0</b></li>
+        <li><span>Vieillesse</span><b data-k="old">0</b></li>
+        <li><span>Cadavres</span><b data-k="corpses">0</b></li>
+      </ul>
+    </section>
+  </div>
+</aside>
+
+<!-- ─────────────────────────────── panneau espèces ──────────────────────── -->
+<aside class="panel panel-right glass" id="panelSpecies">
+  <div class="panel-head">
+    <h2>Espèces <span class="count" id="speciesCount">0</span></h2>
+    <button class="icon-btn small" data-collapse="panelSpecies" title="Réduire">−</button>
+  </div>
+  <div class="panel-body">
+    <button class="btn primary block-btn" id="btnAddSpecies">
+      <span>＋</span> Introduire une espèce
+    </button>
+    <div class="species-list" id="speciesList"></div>
+    <p class="hint" id="extinctHint"></p>
+  </div>
+</aside>
+
+<!-- ─────────────────────────────── inspecteur ───────────────────────────── -->
+<section class="inspector glass hidden" id="inspector" aria-live="polite">
+  <div class="inspector-head">
+    <canvas id="inspectorPortrait" width="96" height="96"></canvas>
+    <div class="inspector-title">
+      <h3 id="inspName">—</h3>
+      <p id="inspMeta">—</p>
+    </div>
+    <div class="inspector-actions">
+      <button class="icon-btn small" id="btnFollow" title="Suivre (F)">🎯</button>
+      <button class="icon-btn small" id="btnCloseInspector" title="Fermer (Échap)">✕</button>
+    </div>
+  </div>
+  <div class="gauges">
+    <div class="gauge"><span>Énergie</span><div class="bar"><i id="gaugeEnergy" style="--c:#7ef0a0"></i></div></div>
+    <div class="gauge"><span>Âge</span><div class="bar"><i id="gaugeAge" style="--c:#9b8cff"></i></div></div>
+  </div>
+  <div class="bars compact" id="inspTraits"></div>
+  <p class="inspector-state" id="inspState">—</p>
+</section>
+
+<!-- ─────────────────────────────── dock de contrôle ─────────────────────── -->
+<footer class="dock glass" id="dock">
+  <button class="icon-btn big" id="btnPlay" title="Lecture / pause (Espace)">▶</button>
+  <button class="icon-btn" id="btnStep" title="Avancer d'un pas (→)">⏭</button>
+
+  <div class="speed">
+    <label for="speedRange">Vitesse</label>
+    <input type="range" id="speedRange" min="0" max="1000" value="200" step="1" aria-label="Vitesse de simulation">
+    <output id="speedOut">×1</output>
+  </div>
+
+  <div class="presets" id="speedPresets">
+    <button data-speed="1">×1</button>
+    <button data-speed="5">×5</button>
+    <button data-speed="25">×25</button>
+    <button data-speed="100">×100</button>
+    <button data-speed="1000">×1000</button>
+  </div>
+
+  <div class="dock-sep"></div>
+
+  <button class="icon-btn" id="btnSave" title="Sauvegarder (S)">💾</button>
+  <button class="icon-btn" id="btnLoad" title="Charger (L)">📂</button>
+  <button class="icon-btn" id="btnNewWorld" title="Nouveau monde (N)">🌍</button>
+  <button class="icon-btn" id="btnSettings" title="Réglages">⚙</button>
+  <button class="icon-btn" id="btnHelp" title="Aide (?)">?</button>
+</footer>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- ─────────────────────────────── fenêtres modales ─────────────────────── -->
+<div class="modal-backdrop hidden" id="modalBackdrop"></div>
+
+<!-- Création d'espèce -->
+<div class="modal glass hidden" id="modalSpecies" role="dialog" aria-modal="true" aria-labelledby="modalSpeciesTitle">
+  <div class="modal-head">
+    <h2 id="modalSpeciesTitle">Introduire une espèce</h2>
+    <button class="icon-btn small" data-close-modal title="Fermer">✕</button>
+  </div>
+  <div class="modal-body species-editor">
+    <div class="editor-left">
+      <canvas id="speciesPreview" width="180" height="180"></canvas>
+      <div class="field">
+        <label for="fieldName">Nom</label>
+        <input type="text" id="fieldName" maxlength="24" placeholder="Auto">
+      </div>
+      <div class="field">
+        <label for="fieldCount">Individus <output id="outCount">30</output></label>
+        <input type="range" id="fieldCount" min="4" max="150" value="30">
+      </div>
+      <div class="field">
+        <label for="fieldHue">Teinte <output id="outHue">120°</output></label>
+        <input type="range" id="fieldHue" min="0" max="359" value="120" class="hue">
+      </div>
+      <div class="diet-presets" id="dietPresets">
+        <button data-diet="herbivore" class="active">🌿 Herbivore</button>
+        <button data-diet="omnivore">🍽️ Omnivore</button>
+        <button data-diet="carnivore">🍖 Carnivore</button>
+      </div>
+    </div>
+    <div class="editor-right" id="traitEditor"></div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn ghost" id="btnRandomSpecies">🎲 Aléatoire</button>
+    <span class="spacer"></span>
+    <button class="btn ghost" data-close-modal>Annuler</button>
+    <button class="btn primary" id="btnCreateSpecies">Introduire</button>
+  </div>
+</div>
+
+<!-- Sauvegardes -->
+<div class="modal glass hidden" id="modalSaves" role="dialog" aria-modal="true" aria-labelledby="modalSavesTitle">
+  <div class="modal-head">
+    <h2 id="modalSavesTitle">Sauvegardes</h2>
+    <button class="icon-btn small" data-close-modal title="Fermer">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="slots" id="saveSlots"></div>
+    <div class="file-row">
+      <button class="btn ghost" id="btnExport">⬇ Exporter un fichier</button>
+      <button class="btn ghost" id="btnImport">⬆ Importer un fichier</button>
+      <input type="file" id="fileInput" accept="application/json,.json" hidden>
+    </div>
+  </div>
+</div>
+
+<!-- Réglages -->
+<div class="modal glass hidden" id="modalSettings" role="dialog" aria-modal="true" aria-labelledby="modalSettingsTitle">
+  <div class="modal-head">
+    <h2 id="modalSettingsTitle">Réglages</h2>
+    <button class="icon-btn small" data-close-modal title="Fermer">✕</button>
+  </div>
+  <div class="modal-body settings">
+    <section>
+      <h3>Simulation</h3>
+      <div class="field">
+        <label for="setMutation">Taux de mutation <output id="outMutation">×1.0</output></label>
+        <input type="range" id="setMutation" min="0" max="400" value="100">
+      </div>
+      <div class="field">
+        <label for="setMaxPop">Population maximale <output id="outMaxPop">1000</output></label>
+        <input type="range" id="setMaxPop" min="100" max="1500" step="50" value="1000">
+      </div>
+      <div class="field">
+        <label for="setSpeciation">Seuil de spéciation <output id="outSpeciation">0.19</output></label>
+        <input type="range" id="setSpeciation" min="5" max="60" value="19">
+      </div>
+      <div class="field">
+        <label for="setCrowding" title="Densité de congénères à partir de laquelle la reproduction se raréfie">
+          Densité tolérée <output id="outCrowding">1.50</output>
+        </label>
+        <input type="range" id="setCrowding" min="40" max="400" value="150">
+      </div>
+      <label class="switch"><input type="checkbox" id="setRepopulate" checked><span></span>Recolonisation automatique</label>
+    </section>
+    <section>
+      <h3>Affichage</h3>
+      <label class="switch"><input type="checkbox" id="optVegetation" checked><span></span>Couche de végétation</label>
+      <label class="switch"><input type="checkbox" id="optParticles" checked><span></span>Particules</label>
+      <label class="switch"><input type="checkbox" id="optWeather" checked><span></span>Effets météo</label>
+      <label class="switch"><input type="checkbox" id="optDayNight" checked><span></span>Cycle jour/nuit</label>
+      <label class="switch"><input type="checkbox" id="optClouds" checked><span></span>Ombres de nuages</label>
+      <label class="switch"><input type="checkbox" id="optMinimap" checked><span></span>Minicarte</label>
+      <label class="switch"><input type="checkbox" id="optVision"><span></span>Champs de vision</label>
+    </section>
+  </div>
+</div>
+
+<!-- Nouveau monde -->
+<div class="modal glass hidden" id="modalNewWorld" role="dialog" aria-modal="true" aria-labelledby="modalNewTitle">
+  <div class="modal-head">
+    <h2 id="modalNewTitle">Nouveau monde</h2>
+    <button class="icon-btn small" data-close-modal title="Fermer">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="field">
+      <label for="fieldSeed">Graine</label>
+      <div class="row">
+        <input type="text" id="fieldSeed" placeholder="Aléatoire">
+        <button class="btn ghost" id="btnDice">🎲</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Peuplement initial</label>
+      <div class="diet-presets" id="worldPresets">
+        <button data-preset="default" class="active">Équilibré</button>
+        <button data-preset="abundance">Abondance</button>
+        <button data-preset="duel">Proies &amp; prédateurs</button>
+      </div>
+    </div>
+    <p class="hint">La génération du terrain prend un instant : relief, humidité, biomes et décors sont calculés pour la graine choisie.</p>
+  </div>
+  <div class="modal-foot">
+    <span class="spacer"></span>
+    <button class="btn ghost" data-close-modal>Annuler</button>
+    <button class="btn primary" id="btnGenerateWorld">Générer</button>
+  </div>
+</div>
+
+<!-- Aide -->
+<div class="modal glass hidden" id="modalHelp" role="dialog" aria-modal="true" aria-labelledby="modalHelpTitle">
+  <div class="modal-head">
+    <h2 id="modalHelpTitle">Guide rapide</h2>
+    <button class="icon-btn small" data-close-modal title="Fermer">✕</button>
+  </div>
+  <div class="modal-body help">
+    <section>
+      <h3>Commandes</h3>
+      <ul class="keys">
+        <li><kbd>Espace</kbd> Pause / reprise</li>
+        <li><kbd>→</kbd> Avancer d'un pas</li>
+        <li><kbd>+</kbd> <kbd>−</kbd> Vitesse</li>
+        <li><kbd>Molette</kbd> Zoom · <kbd>Glisser</kbd> Déplacer</li>
+        <li><kbd>Clic</kbd> Sélectionner une créature</li>
+        <li><kbd>F</kbd> Suivre la créature sélectionnée</li>
+        <li><kbd>Tab</kbd> Masquer les panneaux</li>
+        <li><kbd>S</kbd> / <kbd>L</kbd> Sauvegarder / charger</li>
+        <li><kbd>N</kbd> Nouveau monde · <kbd>V</kbd> Champs de vision</li>
+      </ul>
+    </section>
+    <section>
+      <h3>Le vivant</h3>
+      <p>Chaque créature possède un <b>génome</b> : vitesse, vision, taille, métabolisme,
+        fertilité, longévité, carnivorie, agressivité et sociabilité. À la reproduction,
+        les gènes des deux parents se mélangent et <b>mutent</b> légèrement.</p>
+      <p>Quand un nouveau-né s'écarte trop de l'archétype de son espèce, il fonde une
+        <b>espèce fille</b> : c'est la spéciation, signalée par une onde colorée.</p>
+      <p>La végétation pousse selon la fertilité du sol, la saison, la météo et la lumière.
+        Les herbivores la broutent, les carnivores chassent, les charognards nettoient —
+        et les cadavres finissent par fertiliser la terre.</p>
+    </section>
+  </div>
+</div>
+
+<!-- ─────────────────────────────── chargement ───────────────────────────── -->
+<div class="loading" id="loading">
+  <div class="loading-inner">
+    <div class="orbit"><i></i><i></i><i></i></div>
+    <h2>Genesis</h2>
+    <p id="loadingText">Formation du relief…</p>
+  </div>
+</div>
+
+<noscript>
+  <div class="noscript">Cette simulation nécessite JavaScript pour fonctionner.</div>
+</noscript>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
