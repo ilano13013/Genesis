@@ -41,6 +41,26 @@ export class Particles {
     return this.count;
   }
 
+  /** Redimensionne le pool (profil d'appareil). Vide les particules en vol. */
+  resize(capacity) {
+    if (capacity === this.capacity) return;
+    this.capacity = capacity;
+    this.count = 0;
+    this.x = new Float32Array(capacity);
+    this.y = new Float32Array(capacity);
+    this.vx = new Float32Array(capacity);
+    this.vy = new Float32Array(capacity);
+    this.life = new Float32Array(capacity);
+    this.maxLife = new Float32Array(capacity);
+    this.size = new Float32Array(capacity);
+    this.rot = new Float32Array(capacity);
+    this.spin = new Float32Array(capacity);
+    this.kind = new Uint8Array(capacity);
+    this.r = new Uint8Array(capacity);
+    this.g = new Uint8Array(capacity);
+    this.b = new Uint8Array(capacity);
+  }
+
   clear() {
     this.count = 0;
   }

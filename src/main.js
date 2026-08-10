@@ -27,6 +27,28 @@ const SIM_BUDGET_MS = 11;   // temps de calcul maximal par image
 const MIN_STEP = 1 / 30;    // pas de simulation le plus fin
 const MAX_STEP = 0.12;      // pas le plus grossier (vitesses extrêmes)
 
+/**
+ * Profil d'appareil.
+ *
+ * Sur téléphone, deux contraintes changent la donne : le processeur est
+ * plusieurs fois plus lent, et le canvas de terrain pré-rendu (un pixel par
+ * unité monde) pèse directement sur la mémoire graphique. On réduit donc le
+ * monde et le plafond de population — la densité d'animaux à l'écran, elle,
+ * reste la même.
+ */
+function deviceProfile() {
+  const smallScreen = window.matchMedia('(max-width: 900px)').matches;
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  const weakCpu = (navigator.hardwareConcurrency || 8) <= 4;
+  if (smallScreen && coarse) {
+    return { name: 'mobile', cols: 140, rows: 88, maxPopulation: 420, particles: 700 };
+  }
+  if (coarse || weakCpu) {
+    return { name: 'tablette', cols: 170, rows: 106, maxPopulation: 650, particles: 1000 };
+  }
+  return { name: 'bureau', cols: 200, rows: 125, maxPopulation: 1000, particles: 1500 };
+}
+
 const app = {
   canvas: document.querySelector('#view'),
   eco: null,
@@ -63,7 +85,13 @@ async function boot() {
   loadingText.textContent = 'Formation du relief…';
   await nextFrame();
 
-  app.eco = new Ecosystem({ seed: (Math.random() * 0xffffffff) >>> 0 });
+  app.profile = deviceProfile();
+  app.eco = new Ecosystem({
+    seed: (Math.random() * 0xffffffff) >>> 0,
+    cols: app.profile.cols,
+    rows: app.profile.rows,
+    maxPopulation: app.profile.maxPopulation,
+  });
 
   loadingText.textContent = 'Ensemencement de la végétation…';
   await nextFrame();
@@ -74,6 +102,7 @@ async function boot() {
 
   app.camera = new Camera(app.eco.terrain.width, app.eco.terrain.height);
   app.renderer = new Renderer(app.canvas, saved.display);
+  app.renderer.particles.resize(app.profile.particles);
   app.renderer.attach(app.eco);
 
   app.hud = new Hud();

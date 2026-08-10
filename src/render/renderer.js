@@ -130,6 +130,8 @@ export class Renderer {
     }
     this.width = rect.width;
     this.height = rect.height;
+    // Sur écran étroit, la minicarte occuperait la moitié de la largeur.
+    this.minimapScale = rect.width < 660 ? 0.66 : 1;
     return { width: rect.width, height: rect.height };
   }
 
@@ -646,11 +648,12 @@ export class Renderer {
    * de gauche. C'est la seule zone libre quel que soit l'état de l'interface.
    */
   _minimapRect() {
+    const k = this.minimapScale || 1;
     return {
       x: 18 + this.insets.left,
       y: 80,
-      w: this.minimapW,
-      h: this.minimapH,
+      w: this.minimapW * k,
+      h: this.minimapH * k,
     };
   }
 
@@ -667,7 +670,7 @@ export class Renderer {
     ctx.shadowBlur = 0;
 
     ctx.globalAlpha = 0.92;
-    ctx.drawImage(this.minimapCanvas, x, y);
+    ctx.drawImage(this.minimapCanvas, x, y, w, h);
     ctx.globalAlpha = 1;
 
     // Créatures : un point sur trois suffit à lire la répartition.

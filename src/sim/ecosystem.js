@@ -18,6 +18,9 @@ import { clamp, clamp01, bytesToBase64, base64ToBytes } from '../core/utils.js';
 const HISTORY_MAX = 300;
 const EVENT_MAX = 320;
 
+// Délai minimal entre deux réintroductions de guilde (secondes simulées).
+const RESCUE_COOLDOWN = 150;
+
 
 export const DEFAULT_OPTIONS = {
   cols: 200,
@@ -85,6 +88,7 @@ export class Ecosystem {
     this._birthWindow = 0;
     this._deathWindow = 0;
     this._pruneTimer = 0;
+    this._lastRescue = -1e9;
 
     this.history = {
       time: [], population: [], biomass: [], species: [], avgAge: [],
@@ -476,6 +480,10 @@ export class Ecosystem {
    */
   _rescueGuilds() {
     if (!this.options.autoRepopulate || this.creatures.length < 24) return;
+    // Carence : sans elle, un hiver rigoureux qui tue chaque vague de
+    // réintroduction en déclencherait une nouvelle toutes les 30 secondes,
+    // noyant l'utilisateur sous les notifications.
+    if (this.time - this._lastRescue < RESCUE_COOLDOWN) return;
     if (this.stats.carnivores === 0) this._reintroduce(0.85, 8, 'prédateurs');
     else if (this.stats.herbivores + this.stats.omnivores === 0) this._reintroduce(0.06, 16, 'herbivores');
   }
@@ -487,6 +495,7 @@ export class Ecosystem {
     if (pool.length) {
       const sp = this.rng.pick(pool);
       this.spawnMembers(sp, count);
+      this._lastRescue = this.time;
       this.notices.push({
         type: 'repopulate',
         text: `Retour des ${label} : ${sp.name}`,
@@ -494,6 +503,7 @@ export class Ecosystem {
       });
     } else {
       this.addSpecies({ count, genome: randomGenome(this.rng, carnivory) });
+      this._lastRescue = this.time;
     }
   }
 
@@ -504,6 +514,7 @@ export class Ecosystem {
     if (candidates.length && this.rng.chance(0.75)) {
       const sp = this.rng.pick(candidates);
       this.spawnMembers(sp, 12);
+      this._lastRescue = this.time;
       this.notices.push({ type: 'repopulate', text: `Recolonisation : ${sp.name}`, time: this.time });
     } else {
       this.addSpecies({ count: 18, genome: randomGenome(this.rng, this.rng.chance(0.75) ? 0.08 : 0.8) });

@@ -5,6 +5,34 @@
 const PREFIX = 'genesis.save.';
 export const SLOT_COUNT = 3;
 
+/**
+ * Accès protégé au stockage local. Dans un cadre sandboxé (iframe sans
+ * permissions, navigation privée de certains mobiles), le seul fait de lire
+ * `localStorage` lève une exception : sans ce garde-fou, l'interface des
+ * sauvegardes casserait au lieu de se désactiver proprement.
+ */
+export const storage = {
+  available: (() => {
+    try {
+      const probe = '__genesis_probe__';
+      window.localStorage.setItem(probe, '1');
+      window.localStorage.removeItem(probe);
+      return true;
+    } catch {
+      return false;
+    }
+  })(),
+  get(key) {
+    try { return window.localStorage.getItem(key); } catch { return null; }
+  },
+  set(key, value) {
+    window.localStorage.setItem(key, value); // l'appelant gère l'échec
+  },
+  remove(key) {
+    try { window.localStorage.removeItem(key); } catch { /* indisponible */ }
+  },
+};
+
 function keyOf(slot) {
   return `${PREFIX}${slot}`;
 }
@@ -27,9 +55,12 @@ function buildPayload(ecosystem, meta = {}) {
 
 /** @returns {{ok: boolean, error?: string, meta?: object}} */
 export function saveToSlot(slot, ecosystem, meta = {}) {
+  if (!storage.available) {
+    return { ok: false, error: 'Stockage local indisponible — exportez plutôt un fichier.' };
+  }
   try {
     const payload = buildPayload(ecosystem, meta);
-    localStorage.setItem(keyOf(slot), JSON.stringify(payload));
+    storage.set(keyOf(slot), JSON.stringify(payload));
     return { ok: true, meta: payload.meta, savedAt: payload.savedAt };
   } catch (err) {
     // QuotaExceededError sur les très grosses populations.
@@ -40,7 +71,7 @@ export function saveToSlot(slot, ecosystem, meta = {}) {
 }
 
 export function loadFromSlot(slot) {
-  const raw = localStorage.getItem(keyOf(slot));
+  const raw = storage.get(keyOf(slot));
   if (!raw) return null;
   try {
     const data = JSON.parse(raw);
@@ -51,14 +82,15 @@ export function loadFromSlot(slot) {
 }
 
 export function deleteSlot(slot) {
-  localStorage.removeItem(keyOf(slot));
+  storage.remove(keyOf(slot));
 }
 
 /** Métadonnées de chaque emplacement, pour l'affichage des boutons. */
 export function listSlots() {
+  if (!storage.available) return [];
   const out = [];
   for (let i = 0; i < SLOT_COUNT; i++) {
-    const raw = localStorage.getItem(keyOf(i));
+    const raw = storage.get(keyOf(i));
     if (!raw) { out.push({ slot: i, empty: true }); continue; }
     try {
       const data = JSON.parse(raw);
@@ -118,14 +150,14 @@ export function importFromFile(file) {
 export const prefs = {
   read(defaults = {}) {
     try {
-      return { ...defaults, ...JSON.parse(localStorage.getItem('genesis.prefs') || '{}') };
+      return { ...defaults, ...JSON.parse(storage.get('genesis.prefs') || '{}') };
     } catch {
       return { ...defaults };
     }
   },
   write(value) {
     try {
-      localStorage.setItem('genesis.prefs', JSON.stringify(value));
+      storage.set('genesis.prefs', JSON.stringify(value));
     } catch { /* stockage indisponible : on ignore */ }
   },
 };

@@ -585,7 +585,12 @@ kbd {
 }
 
 @media (max-width: 660px) {
+  /* Le bandeau ne peut pas tout porter : on garde l'heure et la saison, et
+     on retire le compteur d'images — la vitesse figure déjà dans le dock. */
   .world-chips .chip:nth-child(n + 3) { display: none; }
+  .world-chips .chip { flex: none; }
+  .perf { display: none; }
+  .topbar { gap: 10px; }
   .dock {
     gap: 6px; padding: 8px 10px;
     left: 10px; right: 10px; transform: none;
