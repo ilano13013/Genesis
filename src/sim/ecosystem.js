@@ -9,6 +9,8 @@ import { Rng } from '../core/rng.js';
 import { Terrain, BIOME } from '../world/terrain.js';
 import { Food } from '../world/food.js';
 import { Climate } from '../world/climate.js';
+import { Soil } from '../world/soil.js';
+import { Structures, KIND, STRUCTURE_INFO } from './structures.js';
 import { SpatialHash } from './spatialhash.js';
 import { Creature, resetCreatureIds } from './creature.js';
 import { SpeciesRegistry } from './species.js';
@@ -26,7 +28,7 @@ export const DEFAULT_OPTIONS = {
   cols: 200,
   rows: 125,
   cellSize: 16,
-  maxPopulation: 1000,
+  maxPopulation: 1150,
   minPopulation: 12,
   mutationRate: 1,
   speciationThreshold: 0.19,
@@ -34,8 +36,9 @@ export const DEFAULT_OPTIONS = {
   // Régulation dépendante de la densité, en congénères par carré de 100×100 :
   // seuil à partir duquel la reproduction se raréfie, et plage sur laquelle
   // elle devient quasi impossible.
-  crowdingSoft: 1.5,
-  crowdingRange: 2.7,
+  maxStructures: 420,
+  crowdingSoft: 1.3,
+  crowdingRange: 2.4,
   dayLength: 60,
   daysPerSeason: 4,
   statsInterval: 1,
@@ -55,6 +58,7 @@ export class Ecosystem {
       seed: this.seed,
     });
     this.food = new Food(this.terrain, this.rng.fork());
+    this.soil = new Soil(this.terrain);
     this.climate = new Climate(this.rng.fork(), {
       dayLength: this.options.dayLength,
       daysPerSeason: this.options.daysPerSeason,
@@ -67,6 +71,7 @@ export class Ecosystem {
       maxSpecies: 26,
     });
 
+    this.structures = new Structures(this.terrain, this.soil);
     this.grid = new SpatialHash(this.terrain.width, this.terrain.height, 128);
     this.corpseGrid = new SpatialHash(this.terrain.width, this.terrain.height, 160);
 
@@ -114,7 +119,8 @@ export class Ecosystem {
       population: 0, speciesCount: 0, avgAge: 0, avgSpeed: 0, avgSize: 0,
       avgVision: 0, avgLifespan: 0, biomass: 0, herbivores: 0, omnivores: 0,
       carnivores: 0, birthsPerMin: 0, deathsPerMin: 0, generationMax: 0,
-      corpses: 0, oldest: 0,
+      corpses: 0, oldest: 0, builders: 0, swimmers: 0,
+      structures: 0, sites: 0, nests: 0, fields: 0, dikes: 0, transformed: 0,
     };
   }
 
@@ -124,29 +130,38 @@ export class Ecosystem {
    * Peuple le monde de départ : quelques espèces herbivores et un prédateur.
    */
   seedWorld(preset = 'default') {
+    // `traits` force certains gènes par-dessus le tirage aléatoire : c'est
+    // ainsi qu'on garantit la présence d'un peuple bâtisseur au départ,
+    // plutôt que d'attendre que la dérive génétique en fasse apparaître un.
     const presets = {
       default: [
-        { count: 90, carnivory: 0.05, name: null },
-        { count: 55, carnivory: 0.18, name: null },
-        { count: 26, carnivory: 0.82, name: null },
+        { count: 84, carnivory: 0.05 },
+        { count: 48, carnivory: 0.18 },
+        { count: 34, carnivory: 0.08, traits: { builder: 0.78, sociability: 0.85, limbs: 2.4, fertility: 0.9 } },
+        { count: 26, carnivory: 0.82 },
       ],
       abundance: [
-        { count: 140, carnivory: 0.05 },
-        { count: 90, carnivory: 0.12 },
-        { count: 60, carnivory: 0.45 },
+        { count: 130, carnivory: 0.05 },
+        { count: 80, carnivory: 0.12 },
+        { count: 40, carnivory: 0.1, traits: { builder: 0.8, sociability: 0.9 } },
+        { count: 55, carnivory: 0.45 },
         { count: 30, carnivory: 0.85 },
       ],
       duel: [
         { count: 120, carnivory: 0.04 },
         { count: 40, carnivory: 0.9 },
       ],
+      civilisations: [
+        { count: 60, carnivory: 0.06, traits: { builder: 0.82, sociability: 0.9, limbs: 2.6 } },
+        { count: 60, carnivory: 0.35, traits: { builder: 0.7, sociability: 0.75, armor: 0.35 } },
+        { count: 50, carnivory: 0.05, traits: { fins: 0.75, elongation: 1.7, limbs: 0.4 } },
+        { count: 28, carnivory: 0.85, traits: { horns: 0.4 } },
+      ],
     };
     for (const spec of presets[preset] || presets.default) {
-      this.addSpecies({
-        count: spec.count,
-        genome: randomGenome(this.rng, spec.carnivory),
-        name: spec.name || undefined,
-      });
+      const genome = randomGenome(this.rng, spec.carnivory);
+      if (spec.traits) Object.assign(genome, spec.traits);
+      this.addSpecies({ count: spec.count, genome });
     }
     this.sampleStats(true);
     return this;
@@ -244,6 +259,8 @@ export class Ecosystem {
 
     this.climate.update(dt);
     this.food.update(dt, this.climate);
+    this.soil.update(dt, this.food);
+    this.structures.update(dt, this.species);
 
     const creatures = this.creatures;
     this.grid.build(creatures);
@@ -292,8 +309,15 @@ export class Ecosystem {
       // par carré de 100×100, la reproduction devient de plus en plus
       // improbable. C'est ce qui empêche une espèce prospère de saturer le
       // monde entier — et ce qui laisse respirer les espèces rares.
-      if (c.crowding > soft) {
-        const pressure = clamp01((c.crowding - soft) / range);
+      // Un nid abrite la nichée : la colonie tolère une densité que des
+      // animaux sans abri ne supporteraient pas. C'est tout l'intérêt de
+      // bâtir, et ce qui rend les colonies visibles sur la carte.
+      const shelter = this.structures.nests.length
+        ? this.structures.nestComfort(c.x, c.y, c.speciesId)
+        : 0;
+      const tolerated = soft * (1 + shelter * 0.5);
+      if (c.crowding > tolerated) {
+        const pressure = clamp01((c.crowding - tolerated) / range);
         if (this.rng.next() < pressure) { c.mateSearch = 0; continue; }
       }
 
@@ -453,6 +477,58 @@ export class Ecosystem {
     arr.length = w;
   }
 
+  /**
+   * Cherche un chantier pour une créature bâtisseuse.
+   * Les demandes sont espacées par la créature elle-même ; ici on se borne à
+   * refuser si l'espèce a déjà plus d'ouvrages qu'elle n'a de bras.
+   */
+  requestBuildSite(creature) {
+    const sp = this.species.get(creature.speciesId);
+    if (!sp) return null;
+    if (this.structures.count >= this.options.maxStructures) return null;
+    // Un ouvrage pour trois individus : les colonies grandissent avec le
+    // peuple qui les tient, au lieu de couvrir la carte.
+    if (this.structures.countForSpecies(sp.id) > Math.max(2, sp.count / 3)) return null;
+    // Un nid pour quarante individus : une espèce prospère essaime, elle ne
+    // pique pas un hameau à chaque fois qu'un bâtisseur s'écarte du groupe.
+    const site = this.structures.findSite(creature, sp, this.rng, this.time);
+    if (site && site.kind === KIND.NEST &&
+        this.structures.nestCountFor(sp.id) > 1 + sp.count / 40) {
+      this.structures.abandon(site);
+      return null;
+    }
+    return site;
+  }
+
+  /**
+   * Échange avec le grenier de la colonie la plus proche.
+   * Appelé de façon échelonnée : le trajet vers le nid est déjà un coût,
+   * inutile d'y ajouter une recherche à chaque pas.
+   */
+  useNest(creature, dt) {
+    if (this.structures.nests.length === 0) return;
+    const reach = this.terrain.cellSize * 5;
+    const nest = this.structures.nearestNest(creature.x, creature.y, creature.speciesId, reach);
+    if (nest) this.structures.trade(nest, creature, dt);
+  }
+
+  /** Verse le travail d'une créature dans un chantier. */
+  investInBuild(creature, structure, amount) {
+    const finished = this.structures.invest(structure, amount, this.time);
+    if (!finished) return;
+    creature.buildTarget = null;
+    const info = STRUCTURE_INFO[structure.kind];
+    this.emit('build', structure.x, structure.y, creature);
+    const sp = this.species.get(structure.speciesId);
+    if (structure.kind !== KIND.FIELD && sp) {
+      this.notices.push({
+        type: 'build',
+        text: `${sp.name} achève ${info.name === 'Nid' ? 'un nid' : 'une digue'}`,
+        time: this.time,
+      });
+    }
+  }
+
   /** Un charognard consomme le cadavre le plus proche, s'il y en a un. */
   tryScavenge(creature, dt) {
     if (this.corpses.length === 0) return;
@@ -486,11 +562,17 @@ export class Ecosystem {
     if (this.time - this._lastRescue < RESCUE_COOLDOWN) return;
     if (this.stats.carnivores === 0) this._reintroduce(0.85, 8, 'prédateurs');
     else if (this.stats.herbivores + this.stats.omnivores === 0) this._reintroduce(0.06, 16, 'herbivores');
+    // Une lignée bâtisseuse peut s'éteindre pendant une disette ; sans cela
+    // le monde perdrait définitivement toute construction.
+    else if (this.stats.builders === 0 && this.creatures.length > 60) {
+      this._reintroduce(0.08, 14, 'bâtisseurs', { builder: 0.8, sociability: 0.85 });
+    }
   }
 
-  _reintroduce(carnivory, count, label) {
+  _reintroduce(carnivory, count, label, traits = null) {
     const pool = this.species.list.filter(
-      (s) => s.count === 0 && Math.abs(s.archetype.carnivory - carnivory) < 0.32
+      (s) => s.count === 0 && Math.abs(s.archetype.carnivory - carnivory) < 0.32 &&
+        (!traits || s.archetype.builder > 0.55)
     );
     if (pool.length) {
       const sp = this.rng.pick(pool);
@@ -502,7 +584,9 @@ export class Ecosystem {
         time: this.time,
       });
     } else {
-      this.addSpecies({ count, genome: randomGenome(this.rng, carnivory) });
+      const genome = randomGenome(this.rng, carnivory);
+      if (traits) Object.assign(genome, traits);
+      this.addSpecies({ count, genome });
       this._lastRescue = this.time;
     }
   }
@@ -535,7 +619,7 @@ export class Ecosystem {
     }
 
     let age = 0, speed = 0, size = 0, vision = 0, lifespan = 0;
-    let herb = 0, omni = 0, carn = 0, oldest = 0;
+    let herb = 0, omni = 0, carn = 0, oldest = 0, builders = 0, swimmers = 0;
     for (let i = 0; i < n; i++) {
       const c = creatures[i];
       const g = c.genome;
@@ -549,6 +633,8 @@ export class Ecosystem {
       if (d === 'herbivore') herb++;
       else if (d === 'carnivore') carn++;
       else omni++;
+      if (c.isBuilder) builders++;
+      if (c.canSwim) swimmers++;
 
       const sp = this.species.get(c.speciesId);
       if (sp) {
@@ -572,6 +658,15 @@ export class Ecosystem {
     s.oldest = oldest;
     s.corpses = this.corpses.length;
     s.biomass = this.food.totalBiomass;
+    s.builders = builders;
+    s.swimmers = swimmers;
+    const built = this.structures.countByKind();
+    s.nests = built.nest;
+    s.fields = built.field;
+    s.dikes = built.dike;
+    s.sites = built.chantiers;
+    s.structures = built.nest + built.field + built.dike;
+    s.transformed = this.soil.transformedRatio;
     s.generationMax = this.generationMax;
 
     let living = 0;
@@ -672,6 +767,8 @@ export class Ecosystem {
       nextSpeciesId: this.species.nextId,
       creatures: this.creatures.map((c) => [...c.serialize(), genomeToArray(c.genome)]),
       plants: bytesToBase64(this.food.serialize()),
+      soil: bytesToBase64(this.soil.serialize()),
+      structures: this.structures.serialize(),
       history: this.history,
     };
   }
@@ -684,6 +781,10 @@ export class Ecosystem {
     eco.tick = data.tick || 0;
     eco.climate.deserialize(data.climate);
     eco.food.deserialize(base64ToBytes(data.plants));
+    // Le sol se recharge avant les ouvrages : les digues rejouent ensuite
+    // leur remblai par-dessus l'humidité restituée.
+    if (data.soil) eco.soil.deserialize(base64ToBytes(data.soil));
+    if (data.structures) eco.structures.deserialize(data.structures, data.time || 0);
 
     eco.species.list.length = 0;
     eco.species.byId.clear();

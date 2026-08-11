@@ -5,6 +5,11 @@ végétation qui pousse au rythme des saisons, et des centaines de créatures qu
 cherchent leur nourriture, se fuient, se chassent, se reproduisent, vieillissent
 et meurent — en transmettant à leur descendance un génome légèrement muté.
 
+Leur **anatomie** évolue avec elles : carapaces, cornes, nageoires, pattes,
+crêtes et camouflages apparaissent quand l'environnement les récompense, et se
+voient à l'écran. Certaines lignées **bâtissent** — nids, champs, digues — et
+finissent par redessiner la carte elle-même.
+
 **HTML, CSS et JavaScript natifs. Aucun framework, aucune dépendance, aucune
 étape de compilation.**
 
@@ -71,10 +76,66 @@ le sol.
 
 ### Les créatures
 
-Chaque individu porte un génome de dix gènes : vitesse, vision, taille,
-métabolisme, fertilité, longévité, carnivorie, agressivité, sociabilité et
-teinte. Tout le reste en découle — énergie maximale, rayon, âge de maturité,
-coût métabolique, efficacité digestive.
+Chaque individu porte un génome de dix-sept gènes, répartis en trois familles.
+
+**Physiologie** — vitesse, vision, taille, métabolisme, fertilité, longévité.
+
+**Morphologie** — élancement, pattes, carapace, cornes, nageoires, crête,
+camouflage. Ces gènes sont *dessinés* sur la créature et pèsent sur sa survie ;
+chacun est un compromis, sans quoi il dériverait vers son maximum sans rien
+apprendre :
+
+| Gène | Ce qu'il apporte | Ce qu'il coûte |
+|---|---|---|
+| Carapace | encaisse les morsures, isole du froid | ralentit, entretien coûteux |
+| Cornes | rendent les coups à l'assaillant | entretien, dissuadent moins que l'armure |
+| Nageoires | vitesse dans l'eau, franchissement du large | handicap sur terre |
+| Pattes | vitesse sur terre | entretien |
+| Crête | attire les partenaires | se repère de loin, entretien |
+| Camouflage | échappe aux prédateurs | échappe aussi aux partenaires |
+
+Une créature bien camouflée peut se trouver physiquement proche d'un prédateur
+sans jamais être repérée : la distance *perçue* n'est pas la distance réelle.
+
+**Comportement** — carnivorie, agressivité, sociabilité, pulsion bâtisseuse.
+
+Tout le reste en découle : énergie maximale, rayon, âge de maturité, coût
+métabolique, efficacité digestive, résistance aux morsures.
+
+### Les bâtisseurs
+
+Une créature dont le gène « bâtisseur » dépasse le seuil consacre une part de
+son énergie à des ouvrages qui modifient durablement le monde :
+
+- **Nid** — cœur de colonie, et **grenier** : les colons y déposent leur
+  surplus et y puisent quand ils ont faim. C'est ce qui permet à une lignée
+  bâtisseuse de traverser une disette que les autres ne passent pas. Autour de
+  lui, la reproduction tolère une densité plus forte.
+- **Champ** — enrichit le sol de la parcelle et de ses voisines. Répétés, les
+  champs font remonter un désert vers la prairie puis la forêt.
+- **Digue** — remblaie une cellule d'eau peu profonde : le trait de côte
+  recule et la carte gagne des terres.
+
+Champs et digues se bâtissent dans le rayon d'un nid : les colonies dessinent
+des taches cultivées reconnaissables, pas un semis aléatoire. Quand une espèce
+s'éteint, ses ouvrages tombent en ruine — mais ce que le sol a gagné reste.
+
+### Le sol, ou comment la carte évolue
+
+Le relief de départ est figé ; le **sol**, lui, porte un écart d'humidité par
+cellule que la vie fait bouger dans les deux sens :
+
+- une parcelle broutée jusqu'à la terre nue s'appauvrit — la prairie devient
+  désert ;
+- les champs, les cadavres qui se décomposent et les jachères la
+  reconstituent — le désert reverdit.
+
+Le biome est alors reclassé avec le classificateur d'origine : les mêmes seuils
+qui ont dessiné le monde continuent de le redessiner, et seules les cellules
+qui changent sont repeintes. Deux garde-fous, appris à l'usage : la jachère
+*répare* sans jamais dépasser l'état d'origine (aller au-delà demande un
+travail), et un sol déjà pauvre ne s'appauvrit plus — sans quoi la
+désertification s'emballe jusqu'à stériliser la carte entière.
 
 Le comportement combine des pulsions pondérées : fuir un prédateur, chasser une
 proie, rejoindre la meilleure parcelle de végétation, rejoindre un partenaire,
@@ -145,8 +206,9 @@ Coût mesuré par image (Chromium, rendu logiciel, 1600×900) :
 | Créatures | Rendu | Simulation | Total | Budget 60 FPS |
 |---:|---:|---:|---:|---:|
 | 300 | 2,0 ms | 0,5 ms | **2,5 ms** | 16,7 ms |
-| 600 | 4,2 ms | 1,1 ms | **5,4 ms** | 16,7 ms |
+| 650 (anatomie complète, colonies) | 5,5 ms | 0,8 ms | **6,4 ms** | 16,7 ms |
 | 900 | 5,4 ms | 1,7 ms | **7,0 ms** | 16,7 ms |
+| 420 (profil mobile) | 4,9 ms | 0,2 ms | **5,1 ms** | 16,7 ms |
 
 Les principaux leviers :
 
@@ -163,7 +225,12 @@ Les principaux leviers :
 - **Pré-rendu** — terrain, sprite d'ombre de nuage et minicarte sont calculés
   une fois pour toutes.
 - **Niveaux de détail** — au-delà d'un certain dézoom, les créatures passent du
-  dessin complet (corps, queue, pattes, tête, yeux, crocs) au simple disque.
+  dessin complet (corps, nageoires, pattes, carapace, motif, crête, cornes,
+  yeux, crocs) à une silhouette, puis à un simple disque.
+- **Repeint incrémental** — quand un biome change, seules les cellules
+  concernées sont redessinées (bloc de 3×3, budget de 24 cellules par image) ;
+  les décors sont reproductibles car leur générateur aléatoire est dérivé des
+  coordonnées de la cellule.
 
 ---
 
@@ -179,16 +246,19 @@ src/
     utils.js               maths, couleurs, formatage, base64
   world/
     noise.js               bruit de gradient, fBm, ridged, domain warping
+    soil.js                sol mutable : érosion, enrichissement, reclassement
     terrain.js             relief, humidité, biomes, fertilité, requêtes
     climate.js             jour/nuit, saisons, météo, vent
     food.js                végétation en croissance logistique amortie
   sim/
-    genome.js              gènes, mutation, croisement, distance génétique
+    genome.js              17 gènes, mutation, croisement, distance génétique
+    structures.js          nids, champs, digues ; colonies et greniers
     creature.js            perception, décision, déplacement, métabolisme
     species.js             registre des espèces et spéciation
     spatialhash.js         grille de partitionnement spatial
     ecosystem.js           orchestration du temps (sans dépendance au DOM)
   render/
+    anatomy.js             dessin d'une créature à partir de son génome
     camera.js              panoramique, zoom, suivi, secousses
     terrainpainter.js      pré-rendu du terrain et des décors
     renderer.js            couches de rendu, météo, jour/nuit, minicarte
@@ -203,8 +273,10 @@ src/
     toast.js               notifications
   persistence/
     save.js                emplacements locaux, export/import, préférences
+tools/
+  bundle.mjs               repliage en un fichier HTML autonome
 tests/
-  simulation.test.mjs      tests headless du noyau
+  simulation.test.mjs      21 tests headless du noyau
 ```
 
 Le noyau de simulation (`src/sim`, `src/world`, `src/core`) ne touche jamais au

@@ -112,6 +112,25 @@
     </section>
 
     <section class="block">
+      <h3>Morphologie moyenne</h3>
+      <div class="bars" id="morphoBars"></div>
+    </section>
+
+    <section class="block">
+      <h3>Civilisation</h3>
+      <ul class="kv" id="civList">
+        <li><span>Bâtisseurs</span><b data-k="builders">0</b></li>
+        <li><span>Nageurs</span><b data-k="swimmers">0</b></li>
+        <li><span>Nids</span><b data-k="nests">0</b></li>
+        <li><span>Champs</span><b data-k="fields">0</b></li>
+        <li><span>Digues</span><b data-k="dikes">0</b></li>
+        <li><span>Chantiers</span><b data-k="sites">0</b></li>
+        <li><span>Carte transformée</span><b data-k="transformed">0 %</b></li>
+        <li><span>Réserves</span><b data-k="store">0</b></li>
+      </ul>
+    </section>
+
+    <section class="block">
       <h3>Dynamique</h3>
       <ul class="kv" id="dynamicsList">
         <li><span>Naissances / min</span><b data-k="births">0</b></li>
@@ -263,8 +282,8 @@
         <input type="range" id="setMutation" min="0" max="400" value="100">
       </div>
       <div class="field">
-        <label for="setMaxPop">Population maximale <output id="outMaxPop">1000</output></label>
-        <input type="range" id="setMaxPop" min="100" max="1500" step="50" value="1000">
+        <label for="setMaxPop">Population maximale <output id="outMaxPop">1150</output></label>
+        <input type="range" id="setMaxPop" min="100" max="1600" step="50" value="1150">
       </div>
       <div class="field">
         <label for="setSpeciation">Seuil de spéciation <output id="outSpeciation">0.19</output></label>
@@ -272,9 +291,9 @@
       </div>
       <div class="field">
         <label for="setCrowding" title="Densité de congénères à partir de laquelle la reproduction se raréfie">
-          Densité tolérée <output id="outCrowding">1.50</output>
+          Densité tolérée <output id="outCrowding">1.30</output>
         </label>
-        <input type="range" id="setCrowding" min="40" max="400" value="150">
+        <input type="range" id="setCrowding" min="40" max="400" value="130">
       </div>
       <label class="switch"><input type="checkbox" id="setRepopulate" checked><span></span>Recolonisation automatique</label>
     </section>
@@ -311,6 +330,7 @@
         <button data-preset="default" class="active">Équilibré</button>
         <button data-preset="abundance">Abondance</button>
         <button data-preset="duel">Proies &amp; prédateurs</button>
+        <button data-preset="civilisations">Civilisations</button>
       </div>
     </div>
     <p class="hint">La génération du terrain prend un instant : relief, humidité, biomes et décors sont calculés pour la graine choisie.</p>

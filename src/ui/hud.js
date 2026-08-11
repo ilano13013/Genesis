@@ -8,6 +8,7 @@ import { TRAITS } from '../sim/genome.js';
 import { drawStacked, drawArea } from './charts.js';
 
 const SHOWN_TRAITS = ['speed', 'vision', 'size', 'metabolism', 'fertility', 'lifespan'];
+const MORPHO_SHOWN = ['elongation', 'limbs', 'armor', 'horns', 'fins', 'crest', 'pattern'];
 
 export class Hud {
   constructor(root = document) {
@@ -37,7 +38,9 @@ export class Hud {
       chartBiomass: root.querySelector('#chartBiomass'),
       dietBars: root.querySelectorAll('#dietBars .bar-row'),
       traitBars: root.querySelector('#traitBars'),
+      morphoBars: root.querySelector('#morphoBars'),
       dynamics: root.querySelector('#dynamicsList'),
+      civ: root.querySelector('#civList'),
     };
 
     this._buildTraitBars();
@@ -50,20 +53,29 @@ export class Hud {
     for (const b of this.el.dynamics.querySelectorAll('b')) {
       this.dyn[b.dataset.k] = b;
     }
+    this.civ = {};
+    for (const b of this.el.civ.querySelectorAll('b')) {
+      this.civ[b.dataset.k] = b;
+    }
   }
 
   _buildTraitBars() {
-    const frag = document.createDocumentFragment();
     this.traitEls = {};
-    for (const key of SHOWN_TRAITS) {
+    this._fillBars(this.el.traitBars, SHOWN_TRAITS, '#8fd0ff');
+    this._fillBars(this.el.morphoBars, MORPHO_SHOWN, '#c9a6ff');
+  }
+
+  _fillBars(host, keys, color) {
+    const frag = document.createDocumentFragment();
+    for (const key of keys) {
       const t = TRAITS.find((x) => x.key === key);
       const row = document.createElement('div');
       row.className = 'bar-row';
-      row.innerHTML = `<span>${t.icon} ${t.label}</span><div class="bar"><i style="--c:#8fd0ff"></i></div><b>0</b>`;
+      row.innerHTML = `<span>${t.icon} ${t.label}</span><div class="bar"><i style="--c:${color}"></i></div><b>0</b>`;
       frag.appendChild(row);
       this.traitEls[key] = { fill: row.querySelector('i'), value: row.querySelector('b'), trait: t };
     }
-    this.el.traitBars.appendChild(frag);
+    host.appendChild(frag);
   }
 
   /**
@@ -143,15 +155,25 @@ export class Hud {
       row.querySelector('b').textContent = diets[i];
     });
 
-    for (const key of SHOWN_TRAITS) {
+    for (const key of [...SHOWN_TRAITS, ...MORPHO_SHOWN]) {
       const { fill, value, trait } = this.traitEls[key];
       const avg = this._avgTrait(eco, key);
       const ratio = clamp01((avg - trait.min) / (trait.max - trait.min));
       fill.style.width = `${ratio * 100}%`;
-      value.textContent = key === 'size' || key === 'metabolism' || key === 'fertility'
-        ? avg.toFixed(2)
-        : Math.round(avg);
+      value.textContent = trait.max <= 4.01 ? avg.toFixed(2) : Math.round(avg);
     }
+
+    const civ = this.civ;
+    civ.builders.textContent = s.builders;
+    civ.swimmers.textContent = s.swimmers;
+    civ.nests.textContent = s.nests;
+    civ.fields.textContent = s.fields;
+    civ.dikes.textContent = s.dikes;
+    civ.sites.textContent = s.sites;
+    civ.transformed.textContent = `${(s.transformed * 100).toFixed(1)} %`;
+    let store = 0;
+    for (const n of eco.structures.nests) store += n.store;
+    civ.store.textContent = formatNumber(store);
 
     const d = this.dyn;
     d.births.textContent = Math.round(s.birthsPerMin);

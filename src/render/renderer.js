@@ -14,6 +14,8 @@ import { BIOME } from '../world/terrain.js';
 import { paintTerrain } from './terrainpainter.js';
 import { Particles, PK } from './particles.js';
 import { STATE } from '../sim/creature.js';
+import { drawAnatomy, LOD } from './anatomy.js';
+import { KIND, STRUCTURE_INFO } from '../sim/structures.js';
 
 const SEASON_LUSH = [
   [104, 190, 92], [76, 170, 66], [196, 134, 54], [152, 182, 176],
@@ -62,6 +64,9 @@ export class Renderer {
     const painted = paintTerrain(t, 1);
     this.terrainCanvas = painted.canvas;
     this.waterPoints = painted.waterPoints;
+    this.repaintCell = painted.repaintCell;
+    this._minimapStale = false;
+    this._minimapTimer = 0;
 
     this.vegCanvas = document.createElement('canvas');
     this.vegCanvas.width = t.cols;
@@ -150,6 +155,7 @@ export class Renderer {
     const climate = eco.climate;
     const bounds = camera.visibleBounds();
 
+    this._repaintChangedCells();
     this._consumeEvents(camera);
     if (this.options.particles) {
       this.particles.update(dt);
@@ -172,6 +178,7 @@ export class Renderer {
 
     if (this.options.vegetation) this._drawVegetation(ctx, dt, climate);
     this._drawWater(ctx, bounds, camera);
+    this._drawStructures(ctx, bounds, camera);
     this._drawCorpses(ctx, bounds, camera);
     this._drawCreatures(ctx, bounds, camera, climate);
     if (this.options.particles) this.particles.draw(ctx, bounds);
@@ -264,6 +271,122 @@ export class Renderer {
     ctx.restore();
   }
 
+  /**
+   * Repeint les cellules dont le biome a changé (érosion, culture, remblai).
+   * Le budget par image est volontairement bas : la carte se transforme
+   * lentement, et une image ne doit jamais être retardée par le sol.
+   */
+  _repaintChangedCells() {
+    if (!this.repaintCell) return;
+    const cells = this.eco.soil.drainDirty(24);
+    if (!cells) return;
+    const cols = this.eco.terrain.cols;
+    for (let k = 0; k < cells.length; k++) {
+      this.repaintCell(cells[k] % cols, (cells[k] / cols) | 0);
+    }
+    this._minimapStale = true;
+  }
+
+  _drawStructures(ctx, bounds, camera) {
+    const list = this.eco.structures.list;
+    if (!list.length) return;
+    const cs = this.eco.terrain.cellSize;
+    const zoom = camera.zoom;
+    ctx.save();
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (s.x < bounds.minX || s.x > bounds.maxX || s.y < bounds.minY || s.y > bounds.maxY) continue;
+      const info = STRUCTURE_INFO[s.kind];
+      const ruin = s.ruin > 0 ? Math.max(0.25, 1 - s.ruin / 280) : 1;
+
+      if (!s.done) {
+        // Chantier : emprise au sol et jauge d'avancement.
+        const p = s.invested / s.cost;
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = `hsl(${s.hue} 45% 62%)`;
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = Math.max(0.6, 1.2 / zoom);
+        ctx.strokeRect(s.cx * cs + 1, s.cy * cs + 1, cs - 2, cs - 2);
+        ctx.setLineDash([]);
+        ctx.fillStyle = `hsl(${s.hue} 55% 60%)`;
+        ctx.fillRect(s.cx * cs + 2, s.cy * cs + cs - 4, (cs - 4) * p, 2);
+        ctx.globalAlpha = 1;
+        continue;
+      }
+
+      ctx.globalAlpha = ruin;
+      switch (s.kind) {
+        case KIND.FIELD: {
+          // Parcelle cultivée : une tache franche, lisible même de loin,
+          // avec des sillons qui n'apparaissent qu'en approchant.
+          const fx = s.cx * cs, fy = s.cy * cs;
+          ctx.fillStyle = `rgba(${info.color[0]},${info.color[1]},${info.color[2]},0.46)`;
+          ctx.fillRect(fx, fy, cs, cs);
+          ctx.strokeStyle = 'rgba(96, 78, 42, 0.5)';
+          ctx.lineWidth = Math.max(0.5, 1 / zoom);
+          ctx.strokeRect(fx + 0.5, fy + 0.5, cs - 1, cs - 1);
+          if (zoom > 1.2) {
+            ctx.strokeStyle = 'rgba(104, 82, 40, 0.45)';
+            ctx.lineWidth = Math.max(0.6, 1.1 / zoom);
+            ctx.beginPath();
+            for (let k = 1; k < 4; k++) {
+              const y = fy + (k / 4) * cs;
+              ctx.moveTo(fx + 2, y);
+              ctx.lineTo(fx + cs - 2, y);
+            }
+            ctx.stroke();
+          }
+          break;
+        }
+        case KIND.DIKE: {
+          // Muret de pierres.
+          ctx.fillStyle = 'rgba(150, 146, 138, 0.85)';
+          ctx.fillRect(s.cx * cs + 1, s.cy * cs + 1, cs - 2, cs - 2);
+          if (zoom > 0.5) {
+            ctx.fillStyle = 'rgba(196, 192, 184, 0.7)';
+            for (let k = 0; k < 3; k++) {
+              ctx.fillRect(s.cx * cs + 2 + (k % 2) * 5, s.cy * cs + 3 + k * 4, 6, 3);
+            }
+          }
+          break;
+        }
+        case KIND.NEST: {
+          const cxp = s.x, cyp = s.y;
+          const rad = cs * 0.62;
+          ctx.fillStyle = 'rgba(10, 14, 20, 0.32)';
+          ctx.beginPath();
+          ctx.ellipse(cxp + 2, cyp + 3, rad, rad * 0.62, 0, 0, TAU);
+          ctx.fill();
+          // Dôme tressé, teinté de l'espèce
+          ctx.fillStyle = `hsl(${s.hue} 34% 46%)`;
+          ctx.beginPath();
+          ctx.ellipse(cxp, cyp, rad, rad * 0.78, 0, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = `hsl(${s.hue} 40% 62%)`;
+          ctx.beginPath();
+          ctx.ellipse(cxp - rad * 0.2, cyp - rad * 0.22, rad * 0.52, rad * 0.36, 0, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(18, 12, 10, 0.75)';
+          ctx.beginPath();
+          ctx.ellipse(cxp, cyp + rad * 0.22, rad * 0.26, rad * 0.2, 0, 0, TAU);
+          ctx.fill();
+          // Anneau de réserve : un grenier plein se voit de loin.
+          if (s.capacity > 0 && s.store > 1) {
+            const fill = Math.min(1, s.store / s.capacity);
+            ctx.strokeStyle = `rgba(255, 214, 120, ${0.35 + fill * 0.5})`;
+            ctx.lineWidth = Math.max(0.8, 1.6 / zoom);
+            ctx.beginPath();
+            ctx.arc(cxp, cyp, rad * 1.35, -Math.PI / 2, -Math.PI / 2 + fill * TAU);
+            ctx.stroke();
+          }
+          break;
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   _drawCorpses(ctx, bounds, camera) {
     const corpses = this.eco.corpses;
     if (!corpses.length) return;
@@ -333,79 +456,13 @@ export class Renderer {
     ctx.translate(c.x, c.y);
     ctx.rotate(c.heading);
 
-    // Ombre portée
-    ctx.fillStyle = 'rgba(8, 14, 22, 0.28)';
-    ctx.beginPath();
-    ctx.ellipse(r * 0.15, r * 0.42, r * 1.05, r * 0.62, 0, 0, TAU);
-    ctx.fill();
-
-    const wobble = Math.sin(c.phase) * 0.07;
-    const stretch = c.genome.carnivory > 0.55 ? 1.28 : 1.06;
-
-    if (detail === 2) {
-      // Queue ondulante
-      const tailSwing = Math.sin(c.phase * 1.6) * r * 0.55;
-      ctx.strokeStyle = body;
-      ctx.lineWidth = r * 0.42;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(-r * stretch * 0.8, 0);
-      ctx.quadraticCurveTo(-r * stretch * 1.4, tailSwing * 0.6, -r * stretch * 1.9, tailSwing);
-      ctx.stroke();
-
-      // Pattes / nageoires
-      const legSwing = Math.sin(c.phase * 2.2) * r * 0.4;
-      ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.max(12, light - 12)}%)`;
-      ctx.beginPath();
-      ctx.ellipse(legSwing * 0.4, -r * 0.72, r * 0.42, r * 0.22, 0.5, 0, TAU);
-      ctx.ellipse(-legSwing * 0.4, r * 0.72, r * 0.42, r * 0.22, -0.5, 0, TAU);
-      ctx.fill();
-    }
-
-    // Corps
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, r * stretch * (1 + wobble), r * (0.82 - wobble), 0, 0, TAU);
-    ctx.fill();
-
-    // Ventre plus clair
-    ctx.fillStyle = `hsla(${hue} ${sat}% ${Math.min(88, light + 24)}% / 0.55)`;
-    ctx.beginPath();
-    ctx.ellipse(-r * 0.1, r * 0.22, r * stretch * 0.72, r * 0.42, 0, 0, TAU);
-    ctx.fill();
-
-    if (detail === 2) {
-      // Tête
-      const hx = r * stretch * 0.82;
-      ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.min(92, light + 8)}%)`;
-      ctx.beginPath();
-      ctx.arc(hx, 0, r * 0.56, 0, TAU);
-      ctx.fill();
-
-      // Yeux tournés vers la cible
-      const eyeR = Math.max(0.7, r * 0.17);
-      ctx.fillStyle = '#f7fbff';
-      ctx.beginPath();
-      ctx.arc(hx + r * 0.24, -r * 0.26, eyeR, 0, TAU);
-      ctx.arc(hx + r * 0.24, r * 0.26, eyeR, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#14181f';
-      ctx.beginPath();
-      ctx.arc(hx + r * 0.3, -r * 0.26, eyeR * 0.55, 0, TAU);
-      ctx.arc(hx + r * 0.3, r * 0.26, eyeR * 0.55, 0, TAU);
-      ctx.fill();
-
-      // Crocs des prédateurs
-      if (g.carnivory > 0.62) {
-        ctx.fillStyle = '#fff7e8';
-        ctx.beginPath();
-        ctx.moveTo(hx + r * 0.5, -r * 0.12);
-        ctx.lineTo(hx + r * 0.78, 0);
-        ctx.lineTo(hx + r * 0.5, r * 0.12);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
+    // Toute la morphologie est déléguée : le monde et les portraits de
+    // l'interface dessinent le même animal à partir du même génome.
+    drawAnatomy(ctx, g, r, c.phase, {
+      detail: detail === 2 ? LOD.FULL : LOD.SIMPLE,
+      fine: zoom > 0.9,
+      hue, sat, light,
+    });
 
     // Halo d'état
     if (c.state === STATE.HUNT) {
@@ -427,7 +484,8 @@ export class Renderer {
       ctx.globalAlpha = c.flash * 0.7;
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.ellipse(0, 0, r * stretch * 1.05, r * 0.9, 0, 0, TAU);
+      // L'emprise du flash suit l'élancement du corps réellement dessiné.
+      ctx.ellipse(0, 0, r * g.elongation * 1.1, r * 0.9, 0, 0, TAU);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -660,6 +718,16 @@ export class Renderer {
   _drawMinimap(ctx, camera) {
     const { x, y, w, h } = this._minimapRect();
     const t = this.eco.terrain;
+    // La minicarte suit les transformations du sol, sans être redessinée à
+    // chaque cellule modifiée.
+    if (this._minimapStale) {
+      this._minimapTimer = (this._minimapTimer || 0) + 1;
+      if (this._minimapTimer > 30) {
+        this._buildMinimap();
+        this._minimapStale = false;
+        this._minimapTimer = 0;
+      }
+    }
 
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.5)';

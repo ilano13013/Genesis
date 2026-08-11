@@ -12,6 +12,9 @@ import { BIOME, BIOME_INFO } from '../world/terrain.js';
 import { Rng } from '../core/rng.js';
 import { lerp, clamp01, TAU } from '../core/utils.js';
 
+/** Sous-échantillonnage de la couche de couleur (par cellule). */
+const SUB = 3;
+
 /**
  * @param {import('../world/terrain.js').Terrain} terrain
  * @param {number} scale pixels par unité monde
@@ -21,23 +24,79 @@ export function paintTerrain(terrain, scale = 1) {
   const { cols, rows, cellSize } = terrain;
   const W = Math.round(terrain.width * scale);
   const H = Math.round(terrain.height * scale);
+  const px = cellSize * scale;
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
-  // --- 1. couche colorée suréchantillonnée ---------------------------------
-  // Classer les biomes sur une grille 3× plus fine, à partir d'un relief
-  // interpolé, supprime l'aspect « escalier » des côtes et des lisières :
-  // les frontières deviennent des courbes au lieu de suivre les cellules.
-  const SUB = 3;
-  const lw = cols * SUB, lh = rows * SUB;
-  const low = document.createElement('canvas');
-  low.width = lw;
-  low.height = lh;
-  const lowCtx = low.getContext('2d');
-  const img = lowCtx.createImageData(lw, lh);
+  const grain = makeGrainTile(terrain.seed);
+  const grainPattern = ctx.createPattern(grain, 'repeat');
+
+  /**
+   * Peint un rectangle de cellules : couche de couleur suréchantillonnée,
+   * décors, puis grain. C'est la brique unique du rendu du sol — la carte
+   * entière au chargement, un bloc de 3×3 quand une cellule se transforme.
+   */
+  function paintBlock(cx0, cy0, cw, ch) {
+    const x0 = Math.max(0, cx0), y0 = Math.max(0, cy0);
+    const x1 = Math.min(cols, cx0 + cw), y1 = Math.min(rows, cy0 + ch);
+    if (x1 <= x0 || y1 <= y0) return;
+
+    const img = buildColorImage(terrain, x0, y0, x1 - x0, y1 - y0);
+    const tmp = document.createElement('canvas');
+    tmp.width = img.width;
+    tmp.height = img.height;
+    tmp.getContext('2d').putImageData(img, 0, 0);
+
+    const dx = x0 * px, dy = y0 * px;
+    const dw = (x1 - x0) * px, dh = (y1 - y0) * px;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dx, dy, dw, dh);
+    ctx.clip();
+    ctx.clearRect(dx, dy, dw, dh);
+    ctx.drawImage(tmp, dx, dy, dw, dh);
+
+    for (let cy = y0; cy < y1; cy++) {
+      for (let cx = x0; cx < x1; cx++) drawCellDecor(ctx, terrain, cx, cy, px);
+    }
+
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = grainPattern;
+    ctx.fillRect(dx, dy, dw, dh);
+    ctx.restore();
+  }
+
+  paintBlock(0, 0, cols, rows);
+
+  return {
+    canvas,
+    scale,
+    waterPoints: collectWaterPoints(terrain),
+    /**
+     * Repeint une cellule et sa couronne : les décors débordent de leur
+     * case, un repeint trop serré laisserait des moitiés d'arbres.
+     */
+    repaintCell(cx, cy) {
+      paintBlock(cx - 1, cy - 1, 3, 3);
+    },
+  };
+}
+
+/**
+ * Couche de couleur d'un rectangle de cellules, échantillonnée trois fois
+ * plus finement que la grille. Classer les biomes sur ce maillage à partir
+ * d'un relief interpolé supprime l'aspect « escalier » des côtes et des
+ * lisières : les frontières deviennent des courbes.
+ */
+function buildColorImage(terrain, cx0, cy0, cw, ch) {
+  const { cols, rows } = terrain;
+  const lw = cw * SUB, lh = ch * SUB;
+  const img = new ImageData(lw, lh);
   const data = img.data;
   const isWater = new Uint8Array(lw * lh);
 
@@ -54,9 +113,9 @@ export function paintTerrain(terrain, scale = 1) {
   };
 
   for (let sy = 0; sy < lh; sy++) {
-    const fy = (sy + 0.5) / SUB - 0.5;
+    const fy = cy0 + (sy + 0.5) / SUB - 0.5;
     for (let sx = 0; sx < lw; sx++) {
-      const fx = (sx + 0.5) / SUB - 0.5;
+      const fx = cx0 + (sx + 0.5) / SUB - 0.5;
       const e = sample(terrain.elevation, fx, fy);
       const m = sample(terrain.moisture, fx, fy);
       const d = sample(terrain.detail, fx, fy);
@@ -64,7 +123,6 @@ export function paintTerrain(terrain, scale = 1) {
       const b = terrain._classify(e, m);
       const info = BIOME_INFO[b];
 
-      // Mélange des deux teintes du biome selon le micro-relief.
       let r = lerp(info.color2[0], info.color[0], d);
       let g = lerp(info.color2[1], info.color[1], d);
       let bl = lerp(info.color2[2], info.color[2], d);
@@ -93,7 +151,7 @@ export function paintTerrain(terrain, scale = 1) {
   }
 
   // Écume : les pixels d'eau bordant la terre sont éclaircis. Traitée dans
-  // l'image plutôt qu'au trait, l'écume suit exactement la côte.
+  // l'image plutôt qu'au trait, elle suit exactement la côte.
   for (let sy = 1; sy < lh - 1; sy++) {
     for (let sx = 1; sx < lw - 1; sx++) {
       const i = sy * lw + sx;
@@ -105,67 +163,53 @@ export function paintTerrain(terrain, scale = 1) {
       data[o + 2] = lerp(data[o + 2], 255, 0.34);
     }
   }
-  lowCtx.putImageData(img, 0, 0);
+  return img;
+}
 
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(low, 0, 0, W, H);
+/**
+ * Décors d'une cellule. Le générateur aléatoire est dérivé des coordonnées :
+ * une cellule redessinée dix ans plus tard retrouve exactement ses arbres.
+ */
+function drawCellDecor(ctx, terrain, cx, cy, px) {
+  const i = cy * terrain.cols + cx;
+  const b = terrain.biome[i];
+  if (b <= BIOME.WATER) return;
 
-  // --- 2. décors -----------------------------------------------------------
-  const rng = new Rng(terrain.seed ^ 0x5bf03635);
-  const px = cellSize * scale;
+  const rng = new Rng((terrain.seed ^ Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) >>> 0);
+  const x0 = cx * px, y0 = cy * px;
+  const shade = 0.75 + terrain.shade[i] * 0.4;
 
-  for (let cy = 0; cy < rows; cy++) {
-    for (let cx = 0; cx < cols; cx++) {
-      const i = cy * cols + cx;
-      const b = terrain.biome[i];
-      if (b <= BIOME.WATER) continue;
-      const x0 = cx * px, y0 = cy * px;
-      const shade = 0.75 + terrain.shade[i] * 0.4;
-
-      switch (b) {
-        case BIOME.FOREST: {
-          // Densité modérée : au dézoom, une forêt trop fournie masque
-          // complètement le relief et les autres biomes.
-          const n = rng.next() < 0.3 ? 2 : 1;
-          for (let k = 0; k < n; k++) {
-            drawTree(ctx, x0 + rng.range(1, px - 1), y0 + rng.range(1, px - 1),
-              px * rng.range(0.28, 0.44), rng, shade, terrain.moisture[i]);
-          }
-          break;
-        }
-        case BIOME.GRASSLAND:
-          if (rng.next() < 0.07) {
-            drawTree(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2),
-              px * rng.range(0.24, 0.36), rng, shade, terrain.moisture[i]);
-          } else if (rng.next() < 0.5) {
-            drawTuft(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.3, rng, shade);
-          }
-          break;
-        case BIOME.DESERT:
-          if (rng.next() < 0.22) drawDune(ctx, x0, y0, px, rng);
-          else if (rng.next() < 0.05) drawCactus(ctx, x0 + px * 0.5, y0 + px * 0.5, px * 0.4, rng);
-          break;
-        case BIOME.ROCK:
-          if (rng.next() < 0.4) drawRock(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.42), rng, shade);
-          break;
-        case BIOME.SNOW:
-          if (rng.next() < 0.3) drawSnowMound(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.4), rng);
-          break;
-        case BIOME.BEACH:
-          if (rng.next() < 0.16) drawPebble(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.1, rng);
-          break;
+  switch (b) {
+    case BIOME.FOREST: {
+      const n = rng.next() < 0.3 ? 2 : 1;
+      for (let k = 0; k < n; k++) {
+        drawTree(ctx, x0 + rng.range(1, px - 1), y0 + rng.range(1, px - 1),
+          px * rng.range(0.28, 0.44), rng, shade, terrain.moisture[i]);
       }
+      break;
     }
+    case BIOME.GRASSLAND:
+      if (rng.next() < 0.07) {
+        drawTree(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2),
+          px * rng.range(0.24, 0.36), rng, shade, terrain.moisture[i]);
+      } else if (rng.next() < 0.5) {
+        drawTuft(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.3, rng, shade);
+      }
+      break;
+    case BIOME.DESERT:
+      if (rng.next() < 0.22) drawDune(ctx, x0, y0, px, rng);
+      else if (rng.next() < 0.05) drawCactus(ctx, x0 + px * 0.5, y0 + px * 0.5, px * 0.4, rng);
+      break;
+    case BIOME.ROCK:
+      if (rng.next() < 0.4) drawRock(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.42), rng, shade);
+      break;
+    case BIOME.SNOW:
+      if (rng.next() < 0.3) drawSnowMound(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.4), rng);
+      break;
+    case BIOME.BEACH:
+      if (rng.next() < 0.16) drawPebble(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.1, rng);
+      break;
   }
-
-  // --- 3. grain global : casse l'aspect « aplat numérique »
-  applyGrain(ctx, W, H, terrain.seed);
-
-  // Points d'eau échantillonnés pour les reflets animés du rendu temps réel.
-  const waterPoints = collectWaterPoints(terrain);
-
-  return { canvas, waterPoints, scale };
 }
 
 function drawTree(ctx, x, y, r, rng, shade, moisture) {
@@ -279,8 +323,8 @@ function drawPebble(ctx, x, y, r, rng) {
   ctx.fill();
 }
 
-/** Bruit monochrome léger appliqué en `overlay` sur toute la carte. */
-function applyGrain(ctx, W, H, seed) {
+/** Tuile de bruit monochrome, appliquée en `overlay` sur le sol. */
+function makeGrainTile(seed) {
   const tileSize = 128;
   const tile = document.createElement('canvas');
   tile.width = tile.height = tileSize;
@@ -294,12 +338,7 @@ function applyGrain(ctx, W, H, seed) {
     img.data[o + 3] = 34;
   }
   tctx.putImageData(img, 0, 0);
-  ctx.save();
-  ctx.globalCompositeOperation = 'overlay';
-  const pattern = ctx.createPattern(tile, 'repeat');
-  ctx.fillStyle = pattern;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
+  return tile;
 }
 
 /** Échantillonne des points d'eau pour les scintillements animés. */

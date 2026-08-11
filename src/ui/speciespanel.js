@@ -8,12 +8,32 @@ import { drawPortrait } from '../render/portrait.js';
 import { toast } from './toast.js';
 import { Rng } from '../core/rng.js';
 
-const EDITABLE = ['speed', 'vision', 'size', 'metabolism', 'fertility', 'lifespan', 'carnivory', 'aggression', 'sociability'];
+const EDITABLE = [
+  'speed', 'vision', 'size', 'metabolism', 'fertility', 'lifespan',
+  'elongation', 'limbs', 'armor', 'horns', 'fins', 'crest', 'pattern',
+  'carnivory', 'aggression', 'sociability', 'builder',
+];
 
+/**
+ * Points de départ de l'éditeur. La morphologie fait partie du préréglage :
+ * un prédateur naît élancé et armé, un brouteur trapu et camouflé.
+ */
 const DIET_PRESETS = {
-  herbivore: { carnivory: 0.05, aggression: 0.12, speed: 62, size: 1.0, vision: 130, hue: 120 },
-  omnivore: { carnivory: 0.45, aggression: 0.45, speed: 72, size: 1.15, vision: 150, hue: 42 },
-  carnivore: { carnivory: 0.88, aggression: 0.8, speed: 92, size: 1.5, vision: 190, hue: 8 },
+  herbivore: {
+    carnivory: 0.05, aggression: 0.12, speed: 62, size: 1.0, vision: 130, hue: 120,
+    elongation: 1.0, limbs: 2, armor: 0.25, horns: 0.3, fins: 0.05, crest: 0.15,
+    pattern: 0.45, builder: 0.15,
+  },
+  omnivore: {
+    carnivory: 0.45, aggression: 0.45, speed: 72, size: 1.15, vision: 150, hue: 42,
+    elongation: 1.15, limbs: 2, armor: 0.15, horns: 0.15, fins: 0.15, crest: 0.3,
+    pattern: 0.3, builder: 0.35,
+  },
+  carnivore: {
+    carnivory: 0.88, aggression: 0.8, speed: 92, size: 1.5, vision: 190, hue: 8,
+    elongation: 1.5, limbs: 2, armor: 0.1, horns: 0.1, fins: 0.1, crest: 0.2,
+    pattern: 0.25, builder: 0.05,
+  },
 };
 
 export class SpeciesPanel {
@@ -154,7 +174,10 @@ export class SpeciesPanel {
     const diet = sp.diet;
     card.tag.textContent = DIET_LABEL[diet];
     card.tag.className = `sc-tag ${diet}`;
-    card.gen.textContent = `gén. ${sp.generationMax}`;
+    const builds = this.deps.getEco().structures.countForSpecies(sp.id);
+    card.gen.textContent = sp.archetype.builder > 0.55
+      ? `🏗️ ${builds} ouvrage${builds > 1 ? 's' : ''}`
+      : `gén. ${sp.generationMax}`;
     card.peak.textContent = `pic ${sp.peak}`;
 
     if (card.lastCount !== sp.count || sp.history.length % 4 === 0) {
@@ -253,7 +276,7 @@ export class SpeciesPanel {
     for (const key of EDITABLE) {
       const { out, trait } = this.sliders[key];
       const v = this.draft[key];
-      out.textContent = trait.max <= 3
+      out.textContent = trait.max <= 4.01
         ? v.toFixed(2)
         : `${Math.round(v)}${trait.unit === 's' ? ' s' : ''}`;
     }

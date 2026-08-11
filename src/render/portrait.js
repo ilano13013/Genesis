@@ -3,6 +3,7 @@
  * Partagé par l'inspecteur et l'éditeur d'espèces.
  */
 import { TAU, clamp01 } from '../core/utils.js';
+import { drawAnatomy, LOD } from './anatomy.js';
 
 /**
  * @param {CanvasRenderingContext2D} ctx
@@ -41,75 +42,9 @@ export function drawPortrait(ctx, genome, time, opts = {}) {
 
   ctx.rotate(Math.sin(time * 0.5) * 0.12);
 
-  const stretch = genome.carnivory > 0.55 ? 1.28 : 1.06;
-
-  // Ombre
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.beginPath();
-  ctx.ellipse(r * 0.2, r * 0.9, r * 1.1, r * 0.34, 0, 0, TAU);
-  ctx.fill();
-
-  // Queue
-  const swing = Math.sin(phase * 1.6) * r * 0.6;
-  ctx.strokeStyle = body;
-  ctx.lineWidth = r * 0.42;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(-r * stretch * 0.8, 0);
-  ctx.quadraticCurveTo(-r * stretch * 1.4, swing * 0.6, -r * stretch * 1.95, swing);
-  ctx.stroke();
-
-  // Pattes
-  const legSwing = Math.sin(phase * 2.2) * r * 0.42;
-  ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.max(12, light - 12)}%)`;
-  ctx.beginPath();
-  ctx.ellipse(legSwing * 0.4, -r * 0.74, r * 0.44, r * 0.22, 0.5, 0, TAU);
-  ctx.ellipse(-legSwing * 0.4, r * 0.74, r * 0.44, r * 0.22, -0.5, 0, TAU);
-  ctx.fill();
-
-  // Corps
-  const wobble = Math.sin(phase) * 0.07;
-  ctx.fillStyle = body;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, r * stretch * (1 + wobble), r * (0.82 - wobble), 0, 0, TAU);
-  ctx.fill();
-
-  ctx.fillStyle = `hsla(${hue} ${sat}% ${Math.min(88, light + 24)}% / 0.55)`;
-  ctx.beginPath();
-  ctx.ellipse(-r * 0.1, r * 0.22, r * stretch * 0.72, r * 0.42, 0, 0, TAU);
-  ctx.fill();
-
-  // Tête
-  const hx = r * stretch * 0.84;
-  ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.min(92, light + 8)}%)`;
-  ctx.beginPath();
-  ctx.arc(hx, 0, r * 0.58, 0, TAU);
-  ctx.fill();
-
-  // Yeux
-  const eyeR = Math.max(1, r * 0.18);
-  const blink = Math.sin(time * 1.3) > 0.985 ? 0.15 : 1;
-  ctx.fillStyle = '#f7fbff';
-  ctx.beginPath();
-  ctx.ellipse(hx + r * 0.24, -r * 0.27, eyeR, eyeR * blink, 0, 0, TAU);
-  ctx.ellipse(hx + r * 0.24, r * 0.27, eyeR, eyeR * blink, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = '#14181f';
-  ctx.beginPath();
-  ctx.ellipse(hx + r * 0.31, -r * 0.27, eyeR * 0.55, eyeR * 0.55 * blink, 0, 0, TAU);
-  ctx.ellipse(hx + r * 0.31, r * 0.27, eyeR * 0.55, eyeR * 0.55 * blink, 0, 0, TAU);
-  ctx.fill();
-
-  // Crocs
-  if (genome.carnivory > 0.62) {
-    ctx.fillStyle = '#fff7e8';
-    ctx.beginPath();
-    ctx.moveTo(hx + r * 0.5, -r * 0.13);
-    ctx.lineTo(hx + r * 0.82, 0);
-    ctx.lineTo(hx + r * 0.5, r * 0.13);
-    ctx.closePath();
-    ctx.fill();
-  }
+  // Même fonction de dessin que dans le monde : le portrait ne peut pas
+  // montrer une anatomie que la simulation ne rendrait pas.
+  drawAnatomy(ctx, genome, r, phase, { detail: LOD.FULL, fine: true, hue, sat, light });
 
   ctx.restore();
 }

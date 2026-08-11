@@ -10,7 +10,7 @@
  *    régime permanent.
  */
 import { TAU, clamp, clamp01, turnToward } from '../core/utils.js';
-import { dietOf } from './genome.js';
+import { dietOf, BUILDER_THRESHOLD } from './genome.js';
 import { BIOME } from '../world/terrain.js';
 
 export const STATE = {
@@ -20,9 +20,13 @@ export const STATE = {
   FLEE: 3,
   MATE: 4,
   REST: 5,
+  BUILD: 6,
 };
 
-export const STATE_LABEL = ['Exploration', 'Recherche de nourriture', 'Chasse', 'Fuite', 'Reproduction', 'Repos'];
+export const STATE_LABEL = [
+  'Exploration', 'Recherche de nourriture', 'Chasse', 'Fuite',
+  'Reproduction', 'Repos', 'Construction',
+];
 
 // Directions d'échantillonnage de la végétation (pré-calculées).
 const SAMPLE_DIRS = 8;
@@ -49,7 +53,7 @@ const CROWDING_REF = 110;
  *  - `biteGain`  : part des dégâts convertie en énergie pour le prédateur ;
  *  - `mealScale` : bonus de mise à mort, proportionnel au carré de la taille.
  */
-export const PREDATION = { bitePower: 34, biteGain: 0.55, mealScale: 42 };
+export const PREDATION = { bitePower: 34, biteGain: 0.55, mealScale: 50 };
 
 let NEXT_ID = 1;
 
@@ -82,6 +86,7 @@ export class Creature {
       this.meatEfficiency = 0.3 + 0.7 * Math.pow(genome.carnivory, 0.8);
       this.turnRate = 4.6 - genome.size * 0.75;
       this.thinkEvery = genome.vision > 220 ? 3 : 4;
+      this._deriveMorphology(genome);
     }
 
     this.heading = rng ? rng.range(0, TAU) : 0;
@@ -110,8 +115,51 @@ export class Creature {
     this.sepX = 0;
     this.sepY = 0;
 
+    // Chantier en cours (espèces bâtisseuses)
+    this.buildTarget = null;
+    this.buildCooldown = rng ? rng.range(0, 8) : 4;
+    this.buildContributed = 0;
+
     this.causeOfDeath = null;
     return this;
+  }
+
+  /**
+   * Traduit les gènes de morphologie en capacités.
+   *
+   * Chaque pièce d'anatomie est un compromis, sans quoi elle dériverait vers
+   * son maximum sans rien apprendre : la carapace protège mais alourdit, les
+   * nageoires ouvrent l'eau mais gênent sur terre, la crête séduit mais se
+   * repère de loin, le camouflage cache aux prédateurs *et* aux partenaires.
+   */
+  _deriveMorphology(g) {
+    this.legPairs = Math.max(0, Math.round(g.limbs));
+
+    // Locomotion
+    this.landSpeedMul = clamp(1 + g.limbs * 0.07 - g.fins * 0.2 - g.armor * 0.22, 0.35, 1.4);
+    this.waterSpeedMul = 0.4 + g.fins * 1.15;
+    this.canSwim = g.fins > 0.55;
+
+    // Combat
+    this.damageResist = 1 / (1 + g.armor * 2.1);
+    this.thornDamage = g.horns * 13;
+    this.biteBonus = 1 + g.horns * 0.35;
+
+    // Détection : le camouflage éloigne le regard, la crête le rapproche.
+    this.concealment = 1 + g.pattern * 1.7 - g.crest * 0.75;
+    this.matingAppeal = 1 - g.crest * 0.5 + g.pattern * 0.6;
+
+    // Entretien permanent de l'anatomie (énergie par seconde).
+    // Volontairement modeste : les prédateurs vivent déjà à l'équilibre
+    // énergétique, et un surcoût même faible les fait basculer. L'armure
+    // reste le poste le plus lourd — c'est là qu'est le compromis.
+    this.upkeep =
+      g.armor * 0.3 * Math.pow(g.size, 1.4) +
+      g.horns * 0.12 * Math.pow(g.size, 1.2) +
+      g.crest * 0.1 +
+      g.limbs * 0.022;
+
+    this.isBuilder = g.builder > BUILDER_THRESHOLD;
   }
 
   get isAdult() {
@@ -173,15 +221,21 @@ export class Creature {
 
       const sameSpecies = o.speciesId === this.speciesId;
 
+      // Distance *perçue* : le camouflage l'allonge, la crête la raccourcit.
+      // Un animal bien camouflé peut se trouver physiquement proche sans
+      // jamais être repéré — c'est là que le gène gagne sa place.
+      const seen = d2 * o.concealment;
+
       // Prédateur : plus carnivore et sensiblement plus gros que moi.
-      if (!sameSpecies && o.genome.carnivory > 0.32 && o.genome.size > g.size * 0.82) {
-        const danger = d2 / (o.genome.carnivory * o.genome.size);
+      if (!sameSpecies && seen <= r2 && o.genome.carnivory > 0.32 && o.genome.size > g.size * 0.82) {
+        const danger = seen / (o.genome.carnivory * o.genome.size);
         if (danger < bestThreat) { bestThreat = danger; this.threat = o; }
       }
 
-      // Proie : plus petite, et pas de ma propre espèce.
-      if (canHunt && !sameSpecies && o.genome.size < g.size * 1.12) {
-        const gain = d2 / (0.4 + o.genome.size);
+      // Proie : plus petite, et pas de ma propre espèce. Une carapace épaisse
+      // dissuade : le prédateur préfère une cible plus tendre.
+      if (canHunt && !sameSpecies && seen <= r2 && o.genome.size < g.size * 1.12) {
+        const gain = (seen * (1 + o.genome.armor * 1.4 + o.genome.horns * 0.9)) / (0.4 + o.genome.size);
         if (gain < bestPrey) { bestPrey = gain; this.prey = o; }
       }
 
@@ -189,9 +243,13 @@ export class Creature {
         flockCount++;
         fx += o.x;
         fy += o.y;
-        if (wantsMate && o.readyToBreed && d2 < bestMate) {
-          bestMate = d2;
-          this.mate = o;
+        if (wantsMate && o.readyToBreed) {
+          // La parade nuptiale se voit : la crête attire, le camouflage isole.
+          const appeal = d2 * o.matingAppeal;
+          if (appeal < bestMate) {
+            bestMate = appeal;
+            this.mate = o;
+          }
         }
       }
     }
@@ -313,6 +371,25 @@ export class Creature {
       }
     }
 
+    // 4 bis. Rejoindre son chantier. Une créature qui bâtit renonce à
+    // manger et à se reproduire pendant ce temps : le geste a un prix.
+    if (this.buildTarget && !this.threat) {
+      const tx = this.buildTarget.x - this.x, ty = this.buildTarget.y - this.y;
+      const d = Math.sqrt(tx * tx + ty * ty);
+      if (d > 4) {
+        const w = 2.0 * g.builder * (1 - this.hunger * 0.8);
+        dx += (tx / d) * w;
+        dy += (ty / d) * w;
+        if (state === STATE.WANDER || state === STATE.FORAGE) {
+          state = STATE.BUILD;
+          throttle = Math.max(throttle, 0.6);
+        }
+      } else {
+        state = STATE.BUILD;
+        throttle = 0.05;   // sur place : on travaille
+      }
+    }
+
     // 5. Grégarisme (cohésion douce entre congénères).
     if (g.sociability > 0.15 && (this.flockX || this.flockY)) {
       const d = Math.sqrt(this.flockX * this.flockX + this.flockY * this.flockY) || 1;
@@ -368,8 +445,10 @@ export class Creature {
       else if (k === -1) { ax = ch * AV_COS + sh * AV_SIN; ay = sh * AV_COS - ch * AV_SIN; }
       else { ax = ch * AV_COS - sh * AV_SIN; ay = sh * AV_COS + ch * AV_SIN; }
       const b = terrain.biome[terrain.indexAt(this.x + ax * look, this.y + ay * look)];
-      if (b === BIOME.DEEP_WATER) add(-ax, -ay, 2.6);
-      else if (b === BIOME.WATER && this.genome.carnivory < 0.9) add(-ax, -ay, 0.5);
+      // Un animal doté de nageoires ne craint plus le large : l'eau profonde
+      // cesse d'être un mur et devient un territoire à coloniser.
+      if (b === BIOME.DEEP_WATER) { if (!this.canSwim) add(-ax, -ay, 2.6); }
+      else if (b === BIOME.WATER && this.genome.fins < 0.3 && this.genome.carnivory < 0.9) add(-ax, -ay, 0.5);
     }
     const m = 26;
     if (this.x < m) add(1, 0, 2.5);
@@ -400,7 +479,13 @@ export class Creature {
 
     // --- déplacement
     const vigor = clamp(this.vigor, 0.3, 1);
-    const terrainSpeed = env.terrain.speedFactor(this.x, this.y) || 0.35;
+    const biome = env.terrain.biome[env.terrain.indexAt(this.x, this.y)];
+    const inWater = biome <= BIOME.WATER;
+    // Pattes sur la terre ferme, nageoires dans l'eau : la morphologie décide
+    // du milieu où l'animal est à son avantage.
+    const terrainSpeed = inWater
+      ? this.waterSpeedMul * (biome === BIOME.DEEP_WATER ? 0.85 : 1)
+      : (env.terrain.speedFactor(this.x, this.y) || 0.35) * this.landSpeedMul;
     const energyFactor = this.energy < this.maxEnergy * 0.15 ? 0.62 : 1;
     const target = g.speed * throttle * vigor * terrainSpeed * energyFactor;
     this.speed += (target - this.speed) * Math.min(1, dt * 6);
@@ -417,12 +502,16 @@ export class Creature {
     // --- métabolisme
     const v = this.speed / 60;
     const cold = Math.max(0, 0.42 - env.climate.temperature) / Math.sqrt(g.size);
+    // La carapace, les cornes et la crête se paient à chaque seconde de vie ;
+    // le froid pèse moins sur un animal cuirassé.
+    const insulation = 1 - g.armor * 0.35;
     const cost =
       g.metabolism *
       (0.5 * Math.pow(g.size, 1.55) +
         0.0013 * g.vision * Math.sqrt(g.size) +
         1.15 * v * v * Math.pow(g.size, 1.25) +
-        cold * 0.9) *
+        cold * 0.9 * insulation +
+        this.upkeep) *
       dt;
     this.energy -= cost;
 
@@ -447,6 +536,10 @@ export class Creature {
       else if (d2 > (this.senseRadius * 1.3) ** 2) this.prey = null;
     }
 
+    // --- vie de colonie : grenier puis chantier
+    if ((env.tick + this.id) % 6 === 0) env.ecosystem.useNest(this, dt * 6);
+    if (this.isBuilder) this._build(dt, env);
+
     // --- charognage
     if (g.carnivory > 0.3 && this.energy < this.maxEnergy * 0.9) {
       env.ecosystem.tryScavenge(this, dt);
@@ -462,19 +555,56 @@ export class Creature {
     }
   }
 
+  /** L'eau profonde n'arrête que ceux qui ne savent pas nager. */
+  _blocked(terrain, x, y) {
+    return !this.canSwim && terrain.isBlocked(x, y);
+  }
+
+  /**
+   * Travail de construction : cherche un chantier quand on a de quoi, y
+   * verse son énergie quand on y est. Un bâtisseur affamé abandonne.
+   */
+  _build(dt, env) {
+    this.buildCooldown -= dt;
+    const g = this.genome;
+
+    if (this.buildTarget) {
+      if (this.buildTarget.done || this.hunger > 0.6) {
+        this.buildTarget = null;
+        this.buildCooldown = 6;
+        return;
+      }
+      const dx = this.buildTarget.x - this.x, dy = this.buildTarget.y - this.y;
+      const reach = this.radius + 10;
+      if (dx * dx + dy * dy > reach * reach) return;
+      // Le chantier avance à la vitesse du gène, aux frais du bâtisseur.
+      const effort = Math.min(14 * g.builder * dt, this.energy * 0.25);
+      if (effort <= 0) return;
+      this.energy -= effort;
+      this.buildContributed += effort;
+      env.ecosystem.investInBuild(this, this.buildTarget, effort);
+      return;
+    }
+
+    if (this.buildCooldown > 0) return;
+    this.buildCooldown = 4 + env.rng.next() * 6;
+    if (!this.isAdult || this.hunger > 0.42) return;
+    this.buildTarget = env.ecosystem.requestBuildSite(this);
+  }
+
   _moveTo(nx, ny, terrain) {
     const w = terrain.width - 1, h = terrain.height - 1;
     nx = clamp(nx, 1, w);
     ny = clamp(ny, 1, h);
-    if (!terrain.isBlocked(nx, ny)) {
+    if (!this._blocked(terrain, nx, ny)) {
       this.x = nx;
       this.y = ny;
       return;
     }
     // Glissement le long de l'obstacle plutôt qu'un arrêt net.
-    if (!terrain.isBlocked(nx, this.y)) {
+    if (!this._blocked(terrain, nx, this.y)) {
       this.x = nx;
-    } else if (!terrain.isBlocked(this.x, ny)) {
+    } else if (!this._blocked(terrain, this.x, ny)) {
       this.y = ny;
     } else {
       this.heading += Math.PI * 0.65;
@@ -486,13 +616,28 @@ export class Creature {
   _bite(prey, dt, env) {
     if (this.attackCooldown > 0) return;
     const g = this.genome;
-    const power = PREDATION.bitePower * (0.5 + g.aggression) * Math.pow(g.size / prey.genome.size, 0.8);
-    const dmg = Math.min(prey.energy, power * dt);
+    const power = PREDATION.bitePower * (0.5 + g.aggression) * this.biteBonus
+      * Math.pow(g.size / prey.genome.size, 0.8);
+    // La carapace encaisse une part des dégâts, qui est perdue pour tout le
+    // monde : le prédateur peine, la proie survit.
+    const dmg = Math.min(prey.energy, power * dt * prey.damageResist);
     prey.energy -= dmg;
     prey.flash = 1;
     prey.threat = this;
     this.energy = Math.min(this.maxEnergy, this.energy + dmg * PREDATION.biteGain * this.meatEfficiency);
     this.flash = Math.max(this.flash, 0.6);
+
+    // Les cornes rendent les coups : attaquer un animal armé se paie.
+    if (prey.thornDamage > 0) {
+      const back = prey.thornDamage * dt * this.damageResist;
+      this.energy -= back;
+      if (back > 0.4) this.flash = 1;
+      if (this.energy <= 0) {
+        this.causeOfDeath = 'prédation';
+        this.alive = false;
+        this.killedBy = prey.speciesId;
+      }
+    }
 
     if (env.allowEffects && env.rng.chance(0.35)) {
       env.ecosystem.emit('bite', prey.x, prey.y, prey);

@@ -719,6 +719,25 @@ kbd {
     </section>
 
     <section class="block">
+      <h3>Morphologie moyenne</h3>
+      <div class="bars" id="morphoBars"></div>
+    </section>
+
+    <section class="block">
+      <h3>Civilisation</h3>
+      <ul class="kv" id="civList">
+        <li><span>Bâtisseurs</span><b data-k="builders">0</b></li>
+        <li><span>Nageurs</span><b data-k="swimmers">0</b></li>
+        <li><span>Nids</span><b data-k="nests">0</b></li>
+        <li><span>Champs</span><b data-k="fields">0</b></li>
+        <li><span>Digues</span><b data-k="dikes">0</b></li>
+        <li><span>Chantiers</span><b data-k="sites">0</b></li>
+        <li><span>Carte transformée</span><b data-k="transformed">0 %</b></li>
+        <li><span>Réserves</span><b data-k="store">0</b></li>
+      </ul>
+    </section>
+
+    <section class="block">
       <h3>Dynamique</h3>
       <ul class="kv" id="dynamicsList">
         <li><span>Naissances / min</span><b data-k="births">0</b></li>
@@ -870,8 +889,8 @@ kbd {
         <input type="range" id="setMutation" min="0" max="400" value="100">
       </div>
       <div class="field">
-        <label for="setMaxPop">Population maximale <output id="outMaxPop">1000</output></label>
-        <input type="range" id="setMaxPop" min="100" max="1500" step="50" value="1000">
+        <label for="setMaxPop">Population maximale <output id="outMaxPop">1150</output></label>
+        <input type="range" id="setMaxPop" min="100" max="1600" step="50" value="1150">
       </div>
       <div class="field">
         <label for="setSpeciation">Seuil de spéciation <output id="outSpeciation">0.19</output></label>
@@ -879,9 +898,9 @@ kbd {
       </div>
       <div class="field">
         <label for="setCrowding" title="Densité de congénères à partir de laquelle la reproduction se raréfie">
-          Densité tolérée <output id="outCrowding">1.50</output>
+          Densité tolérée <output id="outCrowding">1.30</output>
         </label>
-        <input type="range" id="setCrowding" min="40" max="400" value="150">
+        <input type="range" id="setCrowding" min="40" max="400" value="130">
       </div>
       <label class="switch"><input type="checkbox" id="setRepopulate" checked><span></span>Recolonisation automatique</label>
     </section>
@@ -918,6 +937,7 @@ kbd {
         <button data-preset="default" class="active">Équilibré</button>
         <button data-preset="abundance">Abondance</button>
         <button data-preset="duel">Proies &amp; prédateurs</button>
+        <button data-preset="civilisations">Civilisations</button>
       </div>
     </div>
     <p class="hint">La génération du terrain prend un instant : relief, humidité, biomes et décors sont calculés pour la graine choisie.</p>
@@ -1904,6 +1924,572 @@ class Climate {
   }
 }
 
+// ── src/world/soil.js ─────────────────────────────────────────────
+/**
+ * Sol vivant : la couche qui rend la carte modifiable.
+ *
+ * Le terrain de départ est figé (relief, humidité de référence). Le sol, lui,
+ * porte un *écart* d'humidité par cellule, que la vie fait bouger dans les
+ * deux sens :
+ *
+ *   - **appauvrissement** — une parcelle broutée jusqu'à la terre nue pendant
+ *     longtemps perd sa richesse ; la prairie devient désert ;
+ *   - **enrichissement** — les champs des bâtisseurs, les cadavres qui se
+ *     décomposent et les jachères la reconstituent ; le désert reverdit.
+ *
+ * Le biome est alors reclassé avec le classificateur d'origine : les mêmes
+ * seuils qui ont dessiné le monde continuent de le redessiner. Les cellules
+ * dont le biome change sont signalées « sales » pour que le rendu repeigne
+ * uniquement ce qui a bougé.
+ *
+ * Dégrader est rapide, reconstituer est lent — c'est ce qui donne du poids
+ * aux décisions de l'écosystème.
+ */
+
+/** Le sol est balayé par tranches, comme la végétation. */
+const SOIL_SLICES = 8;
+
+const SOIL = {
+  // Bornes volontairement resserrées côté sec : une prairie peut devenir
+  // désert, mais le monde entier ne peut pas basculer en terre morte.
+  min: -0.26,
+  max: 0.45,
+  degradeRate: 0.00035,  // par seconde de surpâturage
+  regenRate: 0.0005,     // par seconde de jachère — reconstituer va plus vite
+  starvedBelow: 0.12,    // part de la capacité sous laquelle on s'appauvrit
+  restedAbove: 0.7,      // et au-dessus de laquelle on se reconstitue
+  // Seul un sol qui a quelque chose à perdre s'appauvrit. Sans ce garde-fou,
+  // un désert continue de se dégrader faute de végétation — et la boucle
+  // s'emballe jusqu'à stériliser la carte entière.
+  erodibleAbove: 0.24,
+};
+
+class Soil {
+  /** @param {import('./terrain.js').Terrain} terrain */
+  constructor(terrain) {
+    this.terrain = terrain;
+    this.count = terrain.count;
+    // Humidité d'origine : le sol travaille par rapport à cette référence.
+    this.baseMoisture = Float32Array.from(terrain.moisture);
+    this.baseElevation = Float32Array.from(terrain.elevation);
+    this.richness = new Float32Array(this.count);
+    this.originBiome = Uint8Array.from(terrain.biome);
+    this.dirty = new Set();
+    this.slice = 0;
+    this._accum = new Float32Array(SOIL_SLICES);
+    // Nombre de cellules dont le biome diffère *actuellement* de l'origine.
+    // Compter les transitions gonflerait le chiffre dès qu'une parcelle
+    // oscille entre prairie et désert.
+    this.changedCells = 0;
+  }
+
+  /**
+   * Balayage amorti : une tranche par pas, comme la végétation.
+   * @param {number} dt
+   * @param {import('./food.js').Food} food
+   */
+  update(dt, food) {
+    const { terrain, richness } = this;
+    const slice = this.slice;
+    for (let s = 0; s < SOIL_SLICES; s++) this._accum[s] += dt;
+    const localDt = this._accum[slice];
+    this._accum[slice] = 0;
+
+    const degrade = SOIL.degradeRate * localDt;
+    const regen = SOIL.regenRate * localDt;
+
+    for (let i = slice; i < this.count; i += SOIL_SLICES) {
+      const fert = terrain.fertility[i];
+      if (fert < 0.04) continue;               // roche, neige, eau profonde
+      const ratio = food.plants[i] / fert;
+      let delta = 0;
+      if (ratio < SOIL.starvedBelow) {
+        if (fert < SOIL.erodibleAbove) continue;   // rien à éroder
+        delta = -degrade;
+      } else if (ratio > SOIL.restedAbove && richness[i] < 0) {
+        // La jachère *répare*, elle n'améliore pas : la nature revient à son
+        // état d'origine et s'y arrête. Aller au-delà demande un travail —
+        // les champs des bâtisseurs ou la décomposition des cadavres.
+        delta = Math.min(regen, -richness[i]);
+      }
+      if (delta === 0) continue;
+
+      const next = clamp(richness[i] + delta, SOIL.min, SOIL.max);
+      if (next === richness[i]) continue;
+      richness[i] = next;
+      this._apply(i);
+    }
+
+    this.slice = (slice + 1) % SOIL_SLICES;
+  }
+
+  /** Apport ponctuel (champ cultivé, cadavre, outil de l'interface). */
+  enrich(i, amount) {
+    if (i < 0 || i >= this.count) return;
+    const next = clamp(this.richness[i] + amount, SOIL.min, SOIL.max);
+    if (next === this.richness[i]) return;
+    this.richness[i] = next;
+    this._apply(i);
+  }
+
+  /** Apport étalé sur une cellule et ses voisines immédiates. */
+  enrichArea(cx, cy, amount, radius = 1) {
+    const { cols, rows } = this.terrain;
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const x = cx + dx, y = cy + dy;
+        if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
+        const falloff = dx === 0 && dy === 0 ? 1 : 0.35;
+        this.enrich(y * cols + x, amount * falloff);
+      }
+    }
+  }
+
+  /**
+   * Remblai : une cellule d'eau devient terre ferme (digue achevée).
+   * C'est la seule opération qui touche au relief lui-même.
+   */
+  reclaim(i) {
+    if (i < 0 || i >= this.count) return false;
+    if (this.terrain.biome[i] > BIOME.WATER) return false;
+    this.terrain.elevation[i] = 0.375;   // plage : juste au-dessus du rivage
+    this.richness[i] = Math.max(this.richness[i], 0.12);
+    this._apply(i);
+    return true;
+  }
+
+  /** Reclasse une cellule après modification, et signale le repeint. */
+  _apply(i) {
+    const t = this.terrain;
+    const e = t.elevation[i];
+    const m = clamp01(this.baseMoisture[i] + this.richness[i]);
+    t.moisture[i] = m;
+    const b = t._classify(e, m);
+    t.fertility[i] = t._fertilityOf(b, e, m, t.detail[i]);
+    if (b !== t.biome[i]) {
+      const wasChanged = t.biome[i] !== this.originBiome[i];
+      const isChanged = b !== this.originBiome[i];
+      if (wasChanged !== isChanged) this.changedCells += isChanged ? 1 : -1;
+      t.biome[i] = b;
+      this.dirty.add(i);
+    }
+  }
+
+  /** Cellules à repeindre, vidées à la lecture. */
+  drainDirty(limit = 64) {
+    if (this.dirty.size === 0) return null;
+    const out = [];
+    for (const i of this.dirty) {
+      out.push(i);
+      if (out.length >= limit) break;
+    }
+    for (const i of out) this.dirty.delete(i);
+    return out;
+  }
+
+  /** Part du monde dont le biome a été transformé par la vie. */
+  get transformedRatio() {
+    return this.changedCells / this.count;
+  }
+
+  serialize() {
+    // Quantification sur 8 bits de l'intervalle [min, max].
+    const bytes = new Uint8Array(this.count);
+    const span = SOIL.max - SOIL.min;
+    for (let i = 0; i < this.count; i++) {
+      bytes[i] = Math.round(((this.richness[i] - SOIL.min) / span) * 255);
+    }
+    return bytes;
+  }
+
+  deserialize(bytes) {
+    const span = SOIL.max - SOIL.min;
+    const n = Math.min(bytes.length, this.count);
+    for (let i = 0; i < n; i++) {
+      this.richness[i] = SOIL.min + (bytes[i] / 255) * span;
+    }
+    // Reclasse tout le monde d'un coup, sans marquer de cellules sales :
+    // le terrain sera repeint intégralement au chargement.
+    for (let i = 0; i < this.count; i++) {
+      const t = this.terrain;
+      const e = t.elevation[i];
+      const m = clamp01(this.baseMoisture[i] + this.richness[i]);
+      t.moisture[i] = m;
+      t.biome[i] = t._classify(e, m);
+      t.fertility[i] = t._fertilityOf(t.biome[i], e, m, t.detail[i]);
+    }
+    this.dirty.clear();
+  }
+}
+
+// ── src/sim/structures.js ─────────────────────────────────────────
+/**
+ * Ouvrages des espèces bâtisseuses.
+ *
+ * Une créature dont le gène « bâtisseur » dépasse le seuil consacre une part
+ * de son énergie à ériger des ouvrages qui modifient durablement le monde :
+ *
+ *   - **Nid** — cœur de colonie. Autour de lui, les congénères se reproduisent
+ *     malgré l'encombrement : c'est ce qui permet à une espèce bâtisseuse de
+ *     vivre dense là où les autres se dispersent.
+ *   - **Champ** — enrichit le sol de la parcelle et de ses voisines. Répétés,
+ *     les champs font remonter un désert vers la prairie puis la forêt.
+ *   - **Digue** — remblaie une cellule d'eau peu profonde : le trait de côte
+ *     recule, la carte gagne des terres.
+ *
+ * Champs et digues sont bâtis dans le rayon d'un nid : les colonies dessinent
+ * donc des taches cultivées reconnaissables, pas un semis aléatoire.
+ */
+
+const KIND = { NEST: 0, FIELD: 1, DIKE: 2 };
+
+const STRUCTURE_INFO = [
+  { key: 'nest',  name: 'Nid',   icon: '🏠', cost: 90,  radius: 3, color: [214, 178, 116] },
+  { key: 'field', name: 'Champ', icon: '🌾', cost: 46,  radius: 1, color: [186, 196, 108] },
+  { key: 'dike',  name: 'Digue', icon: '🧱', cost: 128, radius: 1, color: [176, 172, 164] },
+];
+
+/** Rayon cultivé autour d'un nid, en cellules. */
+const COLONY_CELLS = 9;
+/**
+ * Distance à laquelle un bâtisseur se rattache à un nid existant. Trop
+ * courte, chacun fonde le sien dès qu'il s'écarte du groupe et la carte se
+ * couvre de hameaux ; assez large, une colonie unique s'étend et se cultive.
+ */
+const COLONY_REACH = 30;
+/** Durée de ruine d'un ouvrage dont l'espèce a disparu (secondes). */
+const RUIN_TIME = 280;
+
+class Structures {
+  /**
+   * @param {import('../world/terrain.js').Terrain} terrain
+   * @param {import('../world/soil.js').Soil} soil
+   */
+  constructor(terrain, soil) {
+    this.terrain = terrain;
+    this.soil = soil;
+    this.list = [];
+    this.byCell = new Map();     // index de cellule -> ouvrage
+    this.nests = [];             // sous-ensemble, pour les recherches de colonie
+    this.built = { nest: 0, field: 0, dike: 0 };
+  }
+
+  get count() {
+    return this.list.length;
+  }
+
+  cellIndex(cx, cy) {
+    return cy * this.terrain.cols + cx;
+  }
+
+  at(cx, cy) {
+    return this.byCell.get(this.cellIndex(cx, cy));
+  }
+
+  // ------------------------------------------------------------- fondation
+
+  /** Pose un chantier. Retourne l'ouvrage, ou null si la cellule est prise. */
+  found(kind, cx, cy, species, time) {
+    const { cols, rows, cellSize } = this.terrain;
+    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) return null;
+    const idx = this.cellIndex(cx, cy);
+    if (this.byCell.has(idx)) return null;
+
+    const s = {
+      kind,
+      cx, cy, idx,
+      x: (cx + 0.5) * cellSize,
+      y: (cy + 0.5) * cellSize,
+      speciesId: species.id,
+      hue: species.hue,
+      invested: 0,
+      cost: STRUCTURE_INFO[kind].cost,
+      store: 0,                       // réserve du grenier (nids)
+      capacity: kind === KIND.NEST ? 300 : 0,
+      done: false,
+      bornAt: time,
+      ruin: 0,
+    };
+    this.list.push(s);
+    this.byCell.set(idx, s);
+    if (kind === KIND.NEST) this.nests.push(s);
+    return s;
+  }
+
+  /**
+   * Grenier : les colons rapportent quand ils ont du surplus et puisent
+   * quand ils ont faim. C'est ce qui donne un intérêt *vital* au nid — bâtir
+   * ne sert pas seulement à se reproduire, mais à traverser les disettes et
+   * les hivers que les espèces sans réserve ne passent pas.
+   *
+   * @returns {number} énergie transférée (positive = la créature reçoit)
+   */
+  trade(nest, creature, dt) {
+    if (!nest.done) return 0;
+    const ratio = creature.energy / creature.maxEnergy;
+    if (ratio > 0.78 && nest.store < nest.capacity) {
+      const give = Math.min(4 * dt, creature.energy * 0.05, nest.capacity - nest.store);
+      creature.energy -= give;
+      nest.store += give * 0.85;      // une part se perd à la manutention
+      return -give;
+    }
+    if (ratio < 0.32 && nest.store > 0) {
+      const take = Math.min(7 * dt, nest.store, creature.maxEnergy - creature.energy);
+      nest.store -= take;
+      creature.energy += take;
+      return take;
+    }
+    return 0;
+  }
+
+  /** Nombre de nids (achevés ou en chantier) pour une espèce. */
+  nestCountFor(speciesId) {
+    let n = 0;
+    for (const s of this.nests) if (s.speciesId === speciesId) n++;
+    return n;
+  }
+
+  /** Retire un chantier qui n'aurait pas dû être ouvert. */
+  abandon(structure) {
+    const i = this.list.indexOf(structure);
+    if (i >= 0) this.list.splice(i, 1);
+    this.byCell.delete(structure.idx);
+    const n = this.nests.indexOf(structure);
+    if (n >= 0) this.nests.splice(n, 1);
+  }
+
+  /**
+   * Apporte de l'énergie à un chantier. Retourne true si l'ouvrage s'achève.
+   */
+  invest(structure, amount, time) {
+    if (structure.done) return false;
+    structure.invested += amount;
+    if (structure.invested < structure.cost) return false;
+    structure.done = true;
+    structure.doneAt = time;
+    this._applyEffect(structure);
+    this.built[STRUCTURE_INFO[structure.kind].key]++;
+    return true;
+  }
+
+  _applyEffect(s) {
+    switch (s.kind) {
+      case KIND.FIELD:
+        // Le champ enrichit sa parcelle et déborde sur ses voisines.
+        this.soil.enrichArea(s.cx, s.cy, 0.3, 1);
+        break;
+      case KIND.DIKE:
+        this.soil.reclaim(s.idx);
+        break;
+      case KIND.NEST:
+        this.soil.enrichArea(s.cx, s.cy, 0.06, 1);
+        break;
+    }
+  }
+
+  // ------------------------------------------------- choix d'un emplacement
+
+  /**
+   * Cherche un chantier pour une créature bâtisseuse : soit un chantier déjà
+   * ouvert à proximité (on aide les siens), soit un nouvel emplacement.
+   * @returns {object|null}
+   */
+  findSite(creature, species, rng, time) {
+    const t = this.terrain;
+    const cx = t.cellX(creature.x);
+    const cy = t.cellY(creature.y);
+
+    // 1. Un chantier en cours du même peuple, à portée : on y va.
+    const pending = this._nearestPending(creature, 5);
+    if (pending) return pending;
+
+    // 2. Sans nid à proximité, on en fonde un.
+    const nest = this.nearestNest(creature.x, creature.y, creature.speciesId, COLONY_REACH * t.cellSize);
+    if (!nest) {
+      const spot = this._scanFor(cx, cy, 3, (i, bx, by) => this._nestScore(i), rng);
+      return spot === null ? null : this.found(KIND.NEST, spot.cx, spot.cy, species, time);
+    }
+
+    // 3. Dans la colonie : digue si le gène est fort et l'eau proche,
+    //    champ sinon.
+    const ncx = nest.cx, ncy = nest.cy;
+    if (creature.genome.builder > 0.75 && rng.chance(0.35)) {
+      const dike = this._scanFor(ncx, ncy, COLONY_CELLS, (i) => this._dikeScore(i), rng);
+      if (dike) return this.found(KIND.DIKE, dike.cx, dike.cy, species, time);
+    }
+    const field = this._scanFor(ncx, ncy, COLONY_CELLS, (i) => this._fieldScore(i), rng);
+    if (field) return this.found(KIND.FIELD, field.cx, field.cy, species, time);
+    return null;
+  }
+
+  _nearestPending(creature, cells) {
+    const t = this.terrain;
+    const r = cells * t.cellSize;
+    const r2 = r * r;
+    let best = null, bestD = Infinity;
+    for (let i = 0; i < this.list.length; i++) {
+      const s = this.list[i];
+      if (s.done || s.speciesId !== creature.speciesId) continue;
+      const dx = s.x - creature.x, dy = s.y - creature.y;
+      const d = dx * dx + dy * dy;
+      if (d < r2 && d < bestD) { bestD = d; best = s; }
+    }
+    return best;
+  }
+
+  /** Balayage d'un carré de cellules ; retient le meilleur score positif. */
+  _scanFor(cx, cy, radius, score, rng) {
+    const t = this.terrain;
+    let best = null, bestScore = 0;
+    const jitter = rng ? rng.next() : 0;
+    for (let dy = -radius; dy <= radius; dy++) {
+      const y = cy + dy;
+      if (y < 0 || y >= t.rows) continue;
+      for (let dx = -radius; dx <= radius; dx++) {
+        const x = cx + dx;
+        if (x < 0 || x >= t.cols) continue;
+        const i = y * t.cols + x;
+        if (this.byCell.has(i)) continue;
+        let v = score(i, x, y);
+        if (v <= 0) continue;
+        // Léger bruit : deux bâtisseurs voisins ne convergent pas sur la
+        // même case, et les colonies ne poussent pas en damier parfait.
+        v *= 0.85 + ((i * 2654435761 % 1000) / 1000 + jitter) % 1 * 0.3;
+        if (v > bestScore) { bestScore = v; best = { cx: x, cy: y }; }
+      }
+    }
+    return best;
+  }
+
+  _nestScore(i) {
+    const b = this.terrain.biome[i];
+    if (b <= BIOME.WATER || b === BIOME.SNOW) return 0;
+    // Un nid veut un sol vivable et un peu de ressource autour.
+    return 0.4 + this.terrain.fertility[i];
+  }
+
+  _fieldScore(i) {
+    const b = this.terrain.biome[i];
+    if (b <= BIOME.WATER || b === BIOME.ROCK || b === BIOME.SNOW) return 0;
+    // On cultive d'abord ce qui est pauvre : c'est là que le gain est réel.
+    const room = 0.95 - this.terrain.fertility[i];
+    return room > 0.08 ? room : 0;
+  }
+
+  _dikeScore(i) {
+    const t = this.terrain;
+    if (t.biome[i] !== BIOME.WATER) return 0;   // hauts-fonds uniquement
+    // Il faut un appui : au moins une cellule de terre adjacente.
+    const cols = t.cols;
+    let land = 0;
+    for (const j of [i - 1, i + 1, i - cols, i + cols]) {
+      if (j >= 0 && j < t.count && t.biome[j] > BIOME.WATER) land++;
+    }
+    return land > 0 ? 0.5 + land * 0.25 : 0;
+  }
+
+  /** Nid le plus proche appartenant à une espèce donnée. */
+  nearestNest(x, y, speciesId, maxDist = Infinity) {
+    let best = null, bestD = maxDist * maxDist;
+    for (let i = 0; i < this.nests.length; i++) {
+      const n = this.nests[i];
+      if (!n.done || n.speciesId !== speciesId) continue;
+      const dx = n.x - x, dy = n.y - y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  }
+
+  /**
+   * Confort de nidification en un point : 1 quand on est au pied d'un nid de
+   * son espèce, 0 au-delà de sa portée. Sert à alléger la pression de densité.
+   */
+  nestComfort(x, y, speciesId) {
+    const reach = STRUCTURE_INFO[KIND.NEST].radius * this.terrain.cellSize * 2.4;
+    const nest = this.nearestNest(x, y, speciesId, reach);
+    if (!nest) return 0;
+    const d = Math.hypot(nest.x - x, nest.y - y);
+    return Math.max(0, 1 - d / reach);
+  }
+
+  // ---------------------------------------------------------------- entretien
+
+  /**
+   * Les ouvrages d'une espèce éteinte tombent en ruine et disparaissent.
+   * Ce que le sol a gagné, lui, reste : la carte garde la trace du passage.
+   */
+  update(dt, speciesRegistry) {
+    let w = 0;
+    for (let i = 0; i < this.list.length; i++) {
+      const s = this.list[i];
+      const sp = speciesRegistry.get(s.speciesId);
+      if (!sp || sp.count === 0) {
+        s.ruin += dt;
+        if (s.ruin > RUIN_TIME) {
+          this.byCell.delete(s.idx);
+          continue;
+        }
+      } else if (s.ruin > 0) {
+        s.ruin = Math.max(0, s.ruin - dt * 2);
+      }
+      // Les vivres se gâtent : un grenier ne remplace pas un territoire.
+      if (s.store > 0) s.store = Math.max(0, s.store - dt * 0.5);
+      this.list[w++] = s;
+    }
+    this.list.length = w;
+
+    let nw = 0;
+    for (let i = 0; i < this.nests.length; i++) {
+      if (this.byCell.get(this.nests[i].idx) === this.nests[i]) this.nests[nw++] = this.nests[i];
+    }
+    this.nests.length = nw;
+  }
+
+  countByKind() {
+    const out = { nest: 0, field: 0, dike: 0, chantiers: 0 };
+    for (const s of this.list) {
+      if (!s.done) { out.chantiers++; continue; }
+      out[STRUCTURE_INFO[s.kind].key]++;
+    }
+    return out;
+  }
+
+  /** Ouvrages d'une espèce, pour l'interface. */
+  countForSpecies(speciesId) {
+    let n = 0;
+    for (const s of this.list) if (s.speciesId === speciesId && s.done) n++;
+    return n;
+  }
+
+  serialize() {
+    return this.list.map((s) => [
+      s.kind, s.cx, s.cy, s.speciesId, Math.round(s.invested),
+      s.done ? 1 : 0, Math.round(s.hue), Math.round(s.store),
+    ]);
+  }
+
+  /** Recharge et réapplique les effets sur le terrain. */
+  deserialize(rows, time = 0) {
+    this.list.length = 0;
+    this.byCell.clear();
+    this.nests.length = 0;
+    this.built = { nest: 0, field: 0, dike: 0 };
+    for (const [kind, cx, cy, speciesId, invested, done, hue, store] of rows || []) {
+      const s = this.found(kind, cx, cy, { id: speciesId, hue }, time);
+      if (!s) continue;
+      s.invested = invested;
+      s.store = store || 0;
+      if (done) {
+        s.done = true;
+        // Les digues doivent être rejouées : le relief n'est pas sérialisé.
+        if (kind === KIND.DIKE) this.soil.reclaim(s.idx);
+        this.built[STRUCTURE_INFO[kind].key]++;
+      }
+    }
+  }
+}
+
 // ── src/sim/spatialhash.js ────────────────────────────────────────
 /**
  * Grille de partitionnement spatial uniforme.
@@ -2002,18 +2588,48 @@ class SpatialHash {
  * descripteur sert à la simulation, à l'interface et à la sérialisation.
  */
 
+/**
+ * Les gènes se répartissent en trois familles :
+ *  - physiologie : ce qui gouverne le métabolisme et le cycle de vie ;
+ *  - morphologie : ce qui est *dessiné* sur la créature et lui coûte ou lui
+ *    rapporte quelque chose — la sélection agit donc sur l'anatomie visible ;
+ *  - comportement : régime, agressivité, grégarisme, pulsion bâtisseuse.
+ *
+ * `weight` pondère la distance génétique : plus il est élevé, plus une
+ * divergence sur ce gène rapproche l'apparition d'une espèce fille.
+ */
 const TRAITS = [
-  { key: 'speed',       label: 'Vitesse',      unit: 'u/s', min: 18,  max: 165, sigma: 5.5,  weight: 1.0, icon: '⚡' },
-  { key: 'vision',      label: 'Vision',       unit: 'u',   min: 35,  max: 360, sigma: 11,   weight: 0.9, icon: '👁️' },
-  { key: 'size',        label: 'Taille',       unit: '×',   min: 0.42, max: 2.8, sigma: 0.075, weight: 1.2, icon: '⬤' },
-  { key: 'metabolism',  label: 'Métabolisme',  unit: '×',   min: 0.5, max: 1.7, sigma: 0.05, weight: 0.8, icon: '🔥' },
-  { key: 'fertility',   label: 'Fertilité',    unit: '×',   min: 0.2, max: 1.8, sigma: 0.06, weight: 0.7, icon: '🥚' },
-  { key: 'lifespan',    label: 'Longévité',    unit: 's',   min: 90,  max: 560, sigma: 15,   weight: 0.5, icon: '⏳' },
-  { key: 'carnivory',   label: 'Carnivorie',   unit: '',    min: 0,   max: 1,   sigma: 0.028, weight: 2.2, icon: '🍖' },
-  { key: 'aggression',  label: 'Agressivité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.6, icon: '💢' },
-  { key: 'sociability', label: 'Sociabilité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.4, icon: '🫂' },
-  { key: 'hue',         label: 'Teinte',       unit: '°',   min: 0,   max: 360, sigma: 4,    weight: 0.0, icon: '🎨' },
+  // — physiologie
+  { key: 'speed',       label: 'Vitesse',      unit: 'u/s', min: 18,  max: 165, sigma: 5.5,  weight: 1.0, icon: '⚡', family: 'physio' },
+  { key: 'vision',      label: 'Vision',       unit: 'u',   min: 35,  max: 360, sigma: 11,   weight: 0.9, icon: '👁️', family: 'physio' },
+  { key: 'size',        label: 'Taille',       unit: '×',   min: 0.42, max: 2.8, sigma: 0.075, weight: 1.2, icon: '⬤', family: 'physio' },
+  { key: 'metabolism',  label: 'Métabolisme',  unit: '×',   min: 0.5, max: 1.7, sigma: 0.05, weight: 0.8, icon: '🔥', family: 'physio' },
+  { key: 'fertility',   label: 'Fertilité',    unit: '×',   min: 0.2, max: 1.8, sigma: 0.06, weight: 0.7, icon: '🥚', family: 'physio' },
+  { key: 'lifespan',    label: 'Longévité',    unit: 's',   min: 90,  max: 560, sigma: 15,   weight: 0.5, icon: '⏳', family: 'physio' },
+
+  // — morphologie : chaque gène est dessiné et a un effet mesurable
+  { key: 'elongation',  label: 'Élancement',   unit: '×',   min: 0.6, max: 2.2, sigma: 0.06, weight: 0.9, icon: '🐟', family: 'morpho' },
+  { key: 'limbs',       label: 'Pattes',       unit: 'p',   min: 0,   max: 4,   sigma: 0.16, weight: 1.1, icon: '🦵', family: 'morpho' },
+  { key: 'armor',       label: 'Carapace',     unit: '',    min: 0,   max: 1,   sigma: 0.03, weight: 1.4, icon: '🛡️', family: 'morpho' },
+  { key: 'horns',       label: 'Cornes',       unit: '',    min: 0,   max: 1,   sigma: 0.03, weight: 1.3, icon: '🦌', family: 'morpho' },
+  { key: 'fins',        label: 'Nageoires',    unit: '',    min: 0,   max: 1,   sigma: 0.03, weight: 1.5, icon: '🌊', family: 'morpho' },
+  { key: 'crest',       label: 'Crête',        unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.7, icon: '👑', family: 'morpho' },
+  { key: 'pattern',     label: 'Camouflage',   unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.8, icon: '🎭', family: 'morpho' },
+
+  // — comportement
+  { key: 'carnivory',   label: 'Carnivorie',   unit: '',    min: 0,   max: 1,   sigma: 0.028, weight: 2.2, icon: '🍖', family: 'compo' },
+  { key: 'aggression',  label: 'Agressivité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.6, icon: '💢', family: 'compo' },
+  { key: 'sociability', label: 'Sociabilité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.4, icon: '🫂', family: 'compo' },
+  { key: 'builder',     label: 'Bâtisseur',    unit: '',    min: 0,   max: 1,   sigma: 0.03, weight: 1.6, icon: '🏗️', family: 'compo' },
+
+  { key: 'hue',         label: 'Teinte',       unit: '°',   min: 0,   max: 360, sigma: 4,    weight: 0.0, icon: '🎨', family: 'compo' },
 ];
+
+/** Gènes dessinés sur la créature. */
+const MORPHO_TRAITS = TRAITS.filter((t) => t.family === 'morpho').map((t) => t.key);
+
+/** Seuil au-delà duquel une créature construit. */
+const BUILDER_THRESHOLD = 0.55;
 
 const TRAIT_MAP = Object.fromEntries(TRAITS.map((t) => [t.key, t]));
 
@@ -2103,7 +2719,11 @@ function hueForDiet(carnivory, rng) {
   return rng.chance(0.65) ? rng.range(-14, 26) : rng.range(268, 320);
 }
 
-/** Génome aléatoire plausible, orienté par un régime alimentaire cible. */
+/**
+ * Génome aléatoire plausible, orienté par un régime alimentaire cible.
+ * La morphologie de départ reste modeste : c'est à l'évolution de faire
+ * pousser carapaces, cornes et nageoires si l'environnement les récompense.
+ */
 function randomGenome(rng, carnivory = null) {
   const c = carnivory === null ? (rng.chance(0.7) ? rng.range(0, 0.25) : rng.range(0.6, 0.95)) : carnivory;
   return makeGenome({
@@ -2113,9 +2733,22 @@ function randomGenome(rng, carnivory = null) {
     metabolism: rng.range(0.75, 1.15),
     fertility: rng.range(0.6, 1.25) - c * 0.25,
     lifespan: rng.range(150, 280),
+
+    // Morphologie de départ presque nue : carapaces, cornes et nageoires
+    // doivent être *gagnées* par la sélection. Les distribuer d'emblée
+    // désarmerait les prédateurs avant que la course aux armements commence.
+    elongation: rng.range(0.85, 1.35) + c * 0.25,
+    limbs: rng.range(0.6, 2.4),
+    armor: rng.range(0, 0.1) * (1 - c),
+    horns: rng.range(0, 0.12) * (1 - c * 0.5),
+    fins: rng.range(0, 0.14),
+    crest: rng.range(0, 0.2),
+    pattern: rng.range(0.05, 0.3),
+
     carnivory: c,
     aggression: c * rng.range(0.5, 1) + rng.range(0, 0.2),
     sociability: rng.range(0.15, 0.9),
+    builder: rng.range(0, 0.35),
     hue: hueForDiet(c, rng),
   });
 }
@@ -2165,9 +2798,13 @@ const STATE = {
   FLEE: 3,
   MATE: 4,
   REST: 5,
+  BUILD: 6,
 };
 
-const STATE_LABEL = ['Exploration', 'Recherche de nourriture', 'Chasse', 'Fuite', 'Reproduction', 'Repos'];
+const STATE_LABEL = [
+  'Exploration', 'Recherche de nourriture', 'Chasse', 'Fuite',
+  'Reproduction', 'Repos', 'Construction',
+];
 
 // Directions d'échantillonnage de la végétation (pré-calculées).
 const SAMPLE_DIRS = 8;
@@ -2194,7 +2831,7 @@ const CROWDING_REF = 110;
  *  - `biteGain`  : part des dégâts convertie en énergie pour le prédateur ;
  *  - `mealScale` : bonus de mise à mort, proportionnel au carré de la taille.
  */
-const PREDATION = { bitePower: 34, biteGain: 0.55, mealScale: 42 };
+const PREDATION = { bitePower: 34, biteGain: 0.55, mealScale: 50 };
 
 let NEXT_ID = 1;
 
@@ -2227,6 +2864,7 @@ class Creature {
       this.meatEfficiency = 0.3 + 0.7 * Math.pow(genome.carnivory, 0.8);
       this.turnRate = 4.6 - genome.size * 0.75;
       this.thinkEvery = genome.vision > 220 ? 3 : 4;
+      this._deriveMorphology(genome);
     }
 
     this.heading = rng ? rng.range(0, TAU) : 0;
@@ -2255,8 +2893,51 @@ class Creature {
     this.sepX = 0;
     this.sepY = 0;
 
+    // Chantier en cours (espèces bâtisseuses)
+    this.buildTarget = null;
+    this.buildCooldown = rng ? rng.range(0, 8) : 4;
+    this.buildContributed = 0;
+
     this.causeOfDeath = null;
     return this;
+  }
+
+  /**
+   * Traduit les gènes de morphologie en capacités.
+   *
+   * Chaque pièce d'anatomie est un compromis, sans quoi elle dériverait vers
+   * son maximum sans rien apprendre : la carapace protège mais alourdit, les
+   * nageoires ouvrent l'eau mais gênent sur terre, la crête séduit mais se
+   * repère de loin, le camouflage cache aux prédateurs *et* aux partenaires.
+   */
+  _deriveMorphology(g) {
+    this.legPairs = Math.max(0, Math.round(g.limbs));
+
+    // Locomotion
+    this.landSpeedMul = clamp(1 + g.limbs * 0.07 - g.fins * 0.2 - g.armor * 0.22, 0.35, 1.4);
+    this.waterSpeedMul = 0.4 + g.fins * 1.15;
+    this.canSwim = g.fins > 0.55;
+
+    // Combat
+    this.damageResist = 1 / (1 + g.armor * 2.1);
+    this.thornDamage = g.horns * 13;
+    this.biteBonus = 1 + g.horns * 0.35;
+
+    // Détection : le camouflage éloigne le regard, la crête le rapproche.
+    this.concealment = 1 + g.pattern * 1.7 - g.crest * 0.75;
+    this.matingAppeal = 1 - g.crest * 0.5 + g.pattern * 0.6;
+
+    // Entretien permanent de l'anatomie (énergie par seconde).
+    // Volontairement modeste : les prédateurs vivent déjà à l'équilibre
+    // énergétique, et un surcoût même faible les fait basculer. L'armure
+    // reste le poste le plus lourd — c'est là qu'est le compromis.
+    this.upkeep =
+      g.armor * 0.3 * Math.pow(g.size, 1.4) +
+      g.horns * 0.12 * Math.pow(g.size, 1.2) +
+      g.crest * 0.1 +
+      g.limbs * 0.022;
+
+    this.isBuilder = g.builder > BUILDER_THRESHOLD;
   }
 
   get isAdult() {
@@ -2318,15 +2999,21 @@ class Creature {
 
       const sameSpecies = o.speciesId === this.speciesId;
 
+      // Distance *perçue* : le camouflage l'allonge, la crête la raccourcit.
+      // Un animal bien camouflé peut se trouver physiquement proche sans
+      // jamais être repéré — c'est là que le gène gagne sa place.
+      const seen = d2 * o.concealment;
+
       // Prédateur : plus carnivore et sensiblement plus gros que moi.
-      if (!sameSpecies && o.genome.carnivory > 0.32 && o.genome.size > g.size * 0.82) {
-        const danger = d2 / (o.genome.carnivory * o.genome.size);
+      if (!sameSpecies && seen <= r2 && o.genome.carnivory > 0.32 && o.genome.size > g.size * 0.82) {
+        const danger = seen / (o.genome.carnivory * o.genome.size);
         if (danger < bestThreat) { bestThreat = danger; this.threat = o; }
       }
 
-      // Proie : plus petite, et pas de ma propre espèce.
-      if (canHunt && !sameSpecies && o.genome.size < g.size * 1.12) {
-        const gain = d2 / (0.4 + o.genome.size);
+      // Proie : plus petite, et pas de ma propre espèce. Une carapace épaisse
+      // dissuade : le prédateur préfère une cible plus tendre.
+      if (canHunt && !sameSpecies && seen <= r2 && o.genome.size < g.size * 1.12) {
+        const gain = (seen * (1 + o.genome.armor * 1.4 + o.genome.horns * 0.9)) / (0.4 + o.genome.size);
         if (gain < bestPrey) { bestPrey = gain; this.prey = o; }
       }
 
@@ -2334,9 +3021,13 @@ class Creature {
         flockCount++;
         fx += o.x;
         fy += o.y;
-        if (wantsMate && o.readyToBreed && d2 < bestMate) {
-          bestMate = d2;
-          this.mate = o;
+        if (wantsMate && o.readyToBreed) {
+          // La parade nuptiale se voit : la crête attire, le camouflage isole.
+          const appeal = d2 * o.matingAppeal;
+          if (appeal < bestMate) {
+            bestMate = appeal;
+            this.mate = o;
+          }
         }
       }
     }
@@ -2458,6 +3149,25 @@ class Creature {
       }
     }
 
+    // 4 bis. Rejoindre son chantier. Une créature qui bâtit renonce à
+    // manger et à se reproduire pendant ce temps : le geste a un prix.
+    if (this.buildTarget && !this.threat) {
+      const tx = this.buildTarget.x - this.x, ty = this.buildTarget.y - this.y;
+      const d = Math.sqrt(tx * tx + ty * ty);
+      if (d > 4) {
+        const w = 2.0 * g.builder * (1 - this.hunger * 0.8);
+        dx += (tx / d) * w;
+        dy += (ty / d) * w;
+        if (state === STATE.WANDER || state === STATE.FORAGE) {
+          state = STATE.BUILD;
+          throttle = Math.max(throttle, 0.6);
+        }
+      } else {
+        state = STATE.BUILD;
+        throttle = 0.05;   // sur place : on travaille
+      }
+    }
+
     // 5. Grégarisme (cohésion douce entre congénères).
     if (g.sociability > 0.15 && (this.flockX || this.flockY)) {
       const d = Math.sqrt(this.flockX * this.flockX + this.flockY * this.flockY) || 1;
@@ -2513,8 +3223,10 @@ class Creature {
       else if (k === -1) { ax = ch * AV_COS + sh * AV_SIN; ay = sh * AV_COS - ch * AV_SIN; }
       else { ax = ch * AV_COS - sh * AV_SIN; ay = sh * AV_COS + ch * AV_SIN; }
       const b = terrain.biome[terrain.indexAt(this.x + ax * look, this.y + ay * look)];
-      if (b === BIOME.DEEP_WATER) add(-ax, -ay, 2.6);
-      else if (b === BIOME.WATER && this.genome.carnivory < 0.9) add(-ax, -ay, 0.5);
+      // Un animal doté de nageoires ne craint plus le large : l'eau profonde
+      // cesse d'être un mur et devient un territoire à coloniser.
+      if (b === BIOME.DEEP_WATER) { if (!this.canSwim) add(-ax, -ay, 2.6); }
+      else if (b === BIOME.WATER && this.genome.fins < 0.3 && this.genome.carnivory < 0.9) add(-ax, -ay, 0.5);
     }
     const m = 26;
     if (this.x < m) add(1, 0, 2.5);
@@ -2545,7 +3257,13 @@ class Creature {
 
     // --- déplacement
     const vigor = clamp(this.vigor, 0.3, 1);
-    const terrainSpeed = env.terrain.speedFactor(this.x, this.y) || 0.35;
+    const biome = env.terrain.biome[env.terrain.indexAt(this.x, this.y)];
+    const inWater = biome <= BIOME.WATER;
+    // Pattes sur la terre ferme, nageoires dans l'eau : la morphologie décide
+    // du milieu où l'animal est à son avantage.
+    const terrainSpeed = inWater
+      ? this.waterSpeedMul * (biome === BIOME.DEEP_WATER ? 0.85 : 1)
+      : (env.terrain.speedFactor(this.x, this.y) || 0.35) * this.landSpeedMul;
     const energyFactor = this.energy < this.maxEnergy * 0.15 ? 0.62 : 1;
     const target = g.speed * throttle * vigor * terrainSpeed * energyFactor;
     this.speed += (target - this.speed) * Math.min(1, dt * 6);
@@ -2562,12 +3280,16 @@ class Creature {
     // --- métabolisme
     const v = this.speed / 60;
     const cold = Math.max(0, 0.42 - env.climate.temperature) / Math.sqrt(g.size);
+    // La carapace, les cornes et la crête se paient à chaque seconde de vie ;
+    // le froid pèse moins sur un animal cuirassé.
+    const insulation = 1 - g.armor * 0.35;
     const cost =
       g.metabolism *
       (0.5 * Math.pow(g.size, 1.55) +
         0.0013 * g.vision * Math.sqrt(g.size) +
         1.15 * v * v * Math.pow(g.size, 1.25) +
-        cold * 0.9) *
+        cold * 0.9 * insulation +
+        this.upkeep) *
       dt;
     this.energy -= cost;
 
@@ -2592,6 +3314,10 @@ class Creature {
       else if (d2 > (this.senseRadius * 1.3) ** 2) this.prey = null;
     }
 
+    // --- vie de colonie : grenier puis chantier
+    if ((env.tick + this.id) % 6 === 0) env.ecosystem.useNest(this, dt * 6);
+    if (this.isBuilder) this._build(dt, env);
+
     // --- charognage
     if (g.carnivory > 0.3 && this.energy < this.maxEnergy * 0.9) {
       env.ecosystem.tryScavenge(this, dt);
@@ -2607,19 +3333,56 @@ class Creature {
     }
   }
 
+  /** L'eau profonde n'arrête que ceux qui ne savent pas nager. */
+  _blocked(terrain, x, y) {
+    return !this.canSwim && terrain.isBlocked(x, y);
+  }
+
+  /**
+   * Travail de construction : cherche un chantier quand on a de quoi, y
+   * verse son énergie quand on y est. Un bâtisseur affamé abandonne.
+   */
+  _build(dt, env) {
+    this.buildCooldown -= dt;
+    const g = this.genome;
+
+    if (this.buildTarget) {
+      if (this.buildTarget.done || this.hunger > 0.6) {
+        this.buildTarget = null;
+        this.buildCooldown = 6;
+        return;
+      }
+      const dx = this.buildTarget.x - this.x, dy = this.buildTarget.y - this.y;
+      const reach = this.radius + 10;
+      if (dx * dx + dy * dy > reach * reach) return;
+      // Le chantier avance à la vitesse du gène, aux frais du bâtisseur.
+      const effort = Math.min(14 * g.builder * dt, this.energy * 0.25);
+      if (effort <= 0) return;
+      this.energy -= effort;
+      this.buildContributed += effort;
+      env.ecosystem.investInBuild(this, this.buildTarget, effort);
+      return;
+    }
+
+    if (this.buildCooldown > 0) return;
+    this.buildCooldown = 4 + env.rng.next() * 6;
+    if (!this.isAdult || this.hunger > 0.42) return;
+    this.buildTarget = env.ecosystem.requestBuildSite(this);
+  }
+
   _moveTo(nx, ny, terrain) {
     const w = terrain.width - 1, h = terrain.height - 1;
     nx = clamp(nx, 1, w);
     ny = clamp(ny, 1, h);
-    if (!terrain.isBlocked(nx, ny)) {
+    if (!this._blocked(terrain, nx, ny)) {
       this.x = nx;
       this.y = ny;
       return;
     }
     // Glissement le long de l'obstacle plutôt qu'un arrêt net.
-    if (!terrain.isBlocked(nx, this.y)) {
+    if (!this._blocked(terrain, nx, this.y)) {
       this.x = nx;
-    } else if (!terrain.isBlocked(this.x, ny)) {
+    } else if (!this._blocked(terrain, this.x, ny)) {
       this.y = ny;
     } else {
       this.heading += Math.PI * 0.65;
@@ -2631,13 +3394,28 @@ class Creature {
   _bite(prey, dt, env) {
     if (this.attackCooldown > 0) return;
     const g = this.genome;
-    const power = PREDATION.bitePower * (0.5 + g.aggression) * Math.pow(g.size / prey.genome.size, 0.8);
-    const dmg = Math.min(prey.energy, power * dt);
+    const power = PREDATION.bitePower * (0.5 + g.aggression) * this.biteBonus
+      * Math.pow(g.size / prey.genome.size, 0.8);
+    // La carapace encaisse une part des dégâts, qui est perdue pour tout le
+    // monde : le prédateur peine, la proie survit.
+    const dmg = Math.min(prey.energy, power * dt * prey.damageResist);
     prey.energy -= dmg;
     prey.flash = 1;
     prey.threat = this;
     this.energy = Math.min(this.maxEnergy, this.energy + dmg * PREDATION.biteGain * this.meatEfficiency);
     this.flash = Math.max(this.flash, 0.6);
+
+    // Les cornes rendent les coups : attaquer un animal armé se paie.
+    if (prey.thornDamage > 0) {
+      const back = prey.thornDamage * dt * this.damageResist;
+      this.energy -= back;
+      if (back > 0.4) this.flash = 1;
+      if (this.energy <= 0) {
+        this.causeOfDeath = 'prédation';
+        this.alive = false;
+        this.killedBy = prey.speciesId;
+      }
+    }
 
     if (env.allowEffects && env.rng.chance(0.35)) {
       env.ecosystem.emit('bite', prey.x, prey.y, prey);
@@ -2871,7 +3649,7 @@ const DEFAULT_OPTIONS = {
   cols: 200,
   rows: 125,
   cellSize: 16,
-  maxPopulation: 1000,
+  maxPopulation: 1150,
   minPopulation: 12,
   mutationRate: 1,
   speciationThreshold: 0.19,
@@ -2879,8 +3657,9 @@ const DEFAULT_OPTIONS = {
   // Régulation dépendante de la densité, en congénères par carré de 100×100 :
   // seuil à partir duquel la reproduction se raréfie, et plage sur laquelle
   // elle devient quasi impossible.
-  crowdingSoft: 1.5,
-  crowdingRange: 2.7,
+  maxStructures: 420,
+  crowdingSoft: 1.3,
+  crowdingRange: 2.4,
   dayLength: 60,
   daysPerSeason: 4,
   statsInterval: 1,
@@ -2900,6 +3679,7 @@ class Ecosystem {
       seed: this.seed,
     });
     this.food = new Food(this.terrain, this.rng.fork());
+    this.soil = new Soil(this.terrain);
     this.climate = new Climate(this.rng.fork(), {
       dayLength: this.options.dayLength,
       daysPerSeason: this.options.daysPerSeason,
@@ -2912,6 +3692,7 @@ class Ecosystem {
       maxSpecies: 26,
     });
 
+    this.structures = new Structures(this.terrain, this.soil);
     this.grid = new SpatialHash(this.terrain.width, this.terrain.height, 128);
     this.corpseGrid = new SpatialHash(this.terrain.width, this.terrain.height, 160);
 
@@ -2959,7 +3740,8 @@ class Ecosystem {
       population: 0, speciesCount: 0, avgAge: 0, avgSpeed: 0, avgSize: 0,
       avgVision: 0, avgLifespan: 0, biomass: 0, herbivores: 0, omnivores: 0,
       carnivores: 0, birthsPerMin: 0, deathsPerMin: 0, generationMax: 0,
-      corpses: 0, oldest: 0,
+      corpses: 0, oldest: 0, builders: 0, swimmers: 0,
+      structures: 0, sites: 0, nests: 0, fields: 0, dikes: 0, transformed: 0,
     };
   }
 
@@ -2969,29 +3751,38 @@ class Ecosystem {
    * Peuple le monde de départ : quelques espèces herbivores et un prédateur.
    */
   seedWorld(preset = 'default') {
+    // `traits` force certains gènes par-dessus le tirage aléatoire : c'est
+    // ainsi qu'on garantit la présence d'un peuple bâtisseur au départ,
+    // plutôt que d'attendre que la dérive génétique en fasse apparaître un.
     const presets = {
       default: [
-        { count: 90, carnivory: 0.05, name: null },
-        { count: 55, carnivory: 0.18, name: null },
-        { count: 26, carnivory: 0.82, name: null },
+        { count: 84, carnivory: 0.05 },
+        { count: 48, carnivory: 0.18 },
+        { count: 34, carnivory: 0.08, traits: { builder: 0.78, sociability: 0.85, limbs: 2.4, fertility: 0.9 } },
+        { count: 26, carnivory: 0.82 },
       ],
       abundance: [
-        { count: 140, carnivory: 0.05 },
-        { count: 90, carnivory: 0.12 },
-        { count: 60, carnivory: 0.45 },
+        { count: 130, carnivory: 0.05 },
+        { count: 80, carnivory: 0.12 },
+        { count: 40, carnivory: 0.1, traits: { builder: 0.8, sociability: 0.9 } },
+        { count: 55, carnivory: 0.45 },
         { count: 30, carnivory: 0.85 },
       ],
       duel: [
         { count: 120, carnivory: 0.04 },
         { count: 40, carnivory: 0.9 },
       ],
+      civilisations: [
+        { count: 60, carnivory: 0.06, traits: { builder: 0.82, sociability: 0.9, limbs: 2.6 } },
+        { count: 60, carnivory: 0.35, traits: { builder: 0.7, sociability: 0.75, armor: 0.35 } },
+        { count: 50, carnivory: 0.05, traits: { fins: 0.75, elongation: 1.7, limbs: 0.4 } },
+        { count: 28, carnivory: 0.85, traits: { horns: 0.4 } },
+      ],
     };
     for (const spec of presets[preset] || presets.default) {
-      this.addSpecies({
-        count: spec.count,
-        genome: randomGenome(this.rng, spec.carnivory),
-        name: spec.name || undefined,
-      });
+      const genome = randomGenome(this.rng, spec.carnivory);
+      if (spec.traits) Object.assign(genome, spec.traits);
+      this.addSpecies({ count: spec.count, genome });
     }
     this.sampleStats(true);
     return this;
@@ -3089,6 +3880,8 @@ class Ecosystem {
 
     this.climate.update(dt);
     this.food.update(dt, this.climate);
+    this.soil.update(dt, this.food);
+    this.structures.update(dt, this.species);
 
     const creatures = this.creatures;
     this.grid.build(creatures);
@@ -3137,8 +3930,15 @@ class Ecosystem {
       // par carré de 100×100, la reproduction devient de plus en plus
       // improbable. C'est ce qui empêche une espèce prospère de saturer le
       // monde entier — et ce qui laisse respirer les espèces rares.
-      if (c.crowding > soft) {
-        const pressure = clamp01((c.crowding - soft) / range);
+      // Un nid abrite la nichée : la colonie tolère une densité que des
+      // animaux sans abri ne supporteraient pas. C'est tout l'intérêt de
+      // bâtir, et ce qui rend les colonies visibles sur la carte.
+      const shelter = this.structures.nests.length
+        ? this.structures.nestComfort(c.x, c.y, c.speciesId)
+        : 0;
+      const tolerated = soft * (1 + shelter * 0.5);
+      if (c.crowding > tolerated) {
+        const pressure = clamp01((c.crowding - tolerated) / range);
         if (this.rng.next() < pressure) { c.mateSearch = 0; continue; }
       }
 
@@ -3298,6 +4098,58 @@ class Ecosystem {
     arr.length = w;
   }
 
+  /**
+   * Cherche un chantier pour une créature bâtisseuse.
+   * Les demandes sont espacées par la créature elle-même ; ici on se borne à
+   * refuser si l'espèce a déjà plus d'ouvrages qu'elle n'a de bras.
+   */
+  requestBuildSite(creature) {
+    const sp = this.species.get(creature.speciesId);
+    if (!sp) return null;
+    if (this.structures.count >= this.options.maxStructures) return null;
+    // Un ouvrage pour trois individus : les colonies grandissent avec le
+    // peuple qui les tient, au lieu de couvrir la carte.
+    if (this.structures.countForSpecies(sp.id) > Math.max(2, sp.count / 3)) return null;
+    // Un nid pour quarante individus : une espèce prospère essaime, elle ne
+    // pique pas un hameau à chaque fois qu'un bâtisseur s'écarte du groupe.
+    const site = this.structures.findSite(creature, sp, this.rng, this.time);
+    if (site && site.kind === KIND.NEST &&
+        this.structures.nestCountFor(sp.id) > 1 + sp.count / 40) {
+      this.structures.abandon(site);
+      return null;
+    }
+    return site;
+  }
+
+  /**
+   * Échange avec le grenier de la colonie la plus proche.
+   * Appelé de façon échelonnée : le trajet vers le nid est déjà un coût,
+   * inutile d'y ajouter une recherche à chaque pas.
+   */
+  useNest(creature, dt) {
+    if (this.structures.nests.length === 0) return;
+    const reach = this.terrain.cellSize * 5;
+    const nest = this.structures.nearestNest(creature.x, creature.y, creature.speciesId, reach);
+    if (nest) this.structures.trade(nest, creature, dt);
+  }
+
+  /** Verse le travail d'une créature dans un chantier. */
+  investInBuild(creature, structure, amount) {
+    const finished = this.structures.invest(structure, amount, this.time);
+    if (!finished) return;
+    creature.buildTarget = null;
+    const info = STRUCTURE_INFO[structure.kind];
+    this.emit('build', structure.x, structure.y, creature);
+    const sp = this.species.get(structure.speciesId);
+    if (structure.kind !== KIND.FIELD && sp) {
+      this.notices.push({
+        type: 'build',
+        text: `${sp.name} achève ${info.name === 'Nid' ? 'un nid' : 'une digue'}`,
+        time: this.time,
+      });
+    }
+  }
+
   /** Un charognard consomme le cadavre le plus proche, s'il y en a un. */
   tryScavenge(creature, dt) {
     if (this.corpses.length === 0) return;
@@ -3331,11 +4183,17 @@ class Ecosystem {
     if (this.time - this._lastRescue < RESCUE_COOLDOWN) return;
     if (this.stats.carnivores === 0) this._reintroduce(0.85, 8, 'prédateurs');
     else if (this.stats.herbivores + this.stats.omnivores === 0) this._reintroduce(0.06, 16, 'herbivores');
+    // Une lignée bâtisseuse peut s'éteindre pendant une disette ; sans cela
+    // le monde perdrait définitivement toute construction.
+    else if (this.stats.builders === 0 && this.creatures.length > 60) {
+      this._reintroduce(0.08, 14, 'bâtisseurs', { builder: 0.8, sociability: 0.85 });
+    }
   }
 
-  _reintroduce(carnivory, count, label) {
+  _reintroduce(carnivory, count, label, traits = null) {
     const pool = this.species.list.filter(
-      (s) => s.count === 0 && Math.abs(s.archetype.carnivory - carnivory) < 0.32
+      (s) => s.count === 0 && Math.abs(s.archetype.carnivory - carnivory) < 0.32 &&
+        (!traits || s.archetype.builder > 0.55)
     );
     if (pool.length) {
       const sp = this.rng.pick(pool);
@@ -3347,7 +4205,9 @@ class Ecosystem {
         time: this.time,
       });
     } else {
-      this.addSpecies({ count, genome: randomGenome(this.rng, carnivory) });
+      const genome = randomGenome(this.rng, carnivory);
+      if (traits) Object.assign(genome, traits);
+      this.addSpecies({ count, genome });
       this._lastRescue = this.time;
     }
   }
@@ -3380,7 +4240,7 @@ class Ecosystem {
     }
 
     let age = 0, speed = 0, size = 0, vision = 0, lifespan = 0;
-    let herb = 0, omni = 0, carn = 0, oldest = 0;
+    let herb = 0, omni = 0, carn = 0, oldest = 0, builders = 0, swimmers = 0;
     for (let i = 0; i < n; i++) {
       const c = creatures[i];
       const g = c.genome;
@@ -3394,6 +4254,8 @@ class Ecosystem {
       if (d === 'herbivore') herb++;
       else if (d === 'carnivore') carn++;
       else omni++;
+      if (c.isBuilder) builders++;
+      if (c.canSwim) swimmers++;
 
       const sp = this.species.get(c.speciesId);
       if (sp) {
@@ -3417,6 +4279,15 @@ class Ecosystem {
     s.oldest = oldest;
     s.corpses = this.corpses.length;
     s.biomass = this.food.totalBiomass;
+    s.builders = builders;
+    s.swimmers = swimmers;
+    const built = this.structures.countByKind();
+    s.nests = built.nest;
+    s.fields = built.field;
+    s.dikes = built.dike;
+    s.sites = built.chantiers;
+    s.structures = built.nest + built.field + built.dike;
+    s.transformed = this.soil.transformedRatio;
     s.generationMax = this.generationMax;
 
     let living = 0;
@@ -3517,6 +4388,8 @@ class Ecosystem {
       nextSpeciesId: this.species.nextId,
       creatures: this.creatures.map((c) => [...c.serialize(), genomeToArray(c.genome)]),
       plants: bytesToBase64(this.food.serialize()),
+      soil: bytesToBase64(this.soil.serialize()),
+      structures: this.structures.serialize(),
       history: this.history,
     };
   }
@@ -3529,6 +4402,10 @@ class Ecosystem {
     eco.tick = data.tick || 0;
     eco.climate.deserialize(data.climate);
     eco.food.deserialize(base64ToBytes(data.plants));
+    // Le sol se recharge avant les ouvrages : les digues rejouent ensuite
+    // leur remblai par-dessus l'humidité restituée.
+    if (data.soil) eco.soil.deserialize(base64ToBytes(data.soil));
+    if (data.structures) eco.structures.deserialize(data.structures, data.time || 0);
 
     eco.species.list.length = 0;
     eco.species.byId.clear();
@@ -3715,6 +4592,9 @@ class Camera {
  *      rend la texture crédible de près.
  */
 
+/** Sous-échantillonnage de la couche de couleur (par cellule). */
+const SUB = 3;
+
 /**
  * @param {import('../world/terrain.js').Terrain} terrain
  * @param {number} scale pixels par unité monde
@@ -3724,23 +4604,79 @@ function paintTerrain(terrain, scale = 1) {
   const { cols, rows, cellSize } = terrain;
   const W = Math.round(terrain.width * scale);
   const H = Math.round(terrain.height * scale);
+  const px = cellSize * scale;
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
-  // --- 1. couche colorée suréchantillonnée ---------------------------------
-  // Classer les biomes sur une grille 3× plus fine, à partir d'un relief
-  // interpolé, supprime l'aspect « escalier » des côtes et des lisières :
-  // les frontières deviennent des courbes au lieu de suivre les cellules.
-  const SUB = 3;
-  const lw = cols * SUB, lh = rows * SUB;
-  const low = document.createElement('canvas');
-  low.width = lw;
-  low.height = lh;
-  const lowCtx = low.getContext('2d');
-  const img = lowCtx.createImageData(lw, lh);
+  const grain = makeGrainTile(terrain.seed);
+  const grainPattern = ctx.createPattern(grain, 'repeat');
+
+  /**
+   * Peint un rectangle de cellules : couche de couleur suréchantillonnée,
+   * décors, puis grain. C'est la brique unique du rendu du sol — la carte
+   * entière au chargement, un bloc de 3×3 quand une cellule se transforme.
+   */
+  function paintBlock(cx0, cy0, cw, ch) {
+    const x0 = Math.max(0, cx0), y0 = Math.max(0, cy0);
+    const x1 = Math.min(cols, cx0 + cw), y1 = Math.min(rows, cy0 + ch);
+    if (x1 <= x0 || y1 <= y0) return;
+
+    const img = buildColorImage(terrain, x0, y0, x1 - x0, y1 - y0);
+    const tmp = document.createElement('canvas');
+    tmp.width = img.width;
+    tmp.height = img.height;
+    tmp.getContext('2d').putImageData(img, 0, 0);
+
+    const dx = x0 * px, dy = y0 * px;
+    const dw = (x1 - x0) * px, dh = (y1 - y0) * px;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dx, dy, dw, dh);
+    ctx.clip();
+    ctx.clearRect(dx, dy, dw, dh);
+    ctx.drawImage(tmp, dx, dy, dw, dh);
+
+    for (let cy = y0; cy < y1; cy++) {
+      for (let cx = x0; cx < x1; cx++) drawCellDecor(ctx, terrain, cx, cy, px);
+    }
+
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = grainPattern;
+    ctx.fillRect(dx, dy, dw, dh);
+    ctx.restore();
+  }
+
+  paintBlock(0, 0, cols, rows);
+
+  return {
+    canvas,
+    scale,
+    waterPoints: collectWaterPoints(terrain),
+    /**
+     * Repeint une cellule et sa couronne : les décors débordent de leur
+     * case, un repeint trop serré laisserait des moitiés d'arbres.
+     */
+    repaintCell(cx, cy) {
+      paintBlock(cx - 1, cy - 1, 3, 3);
+    },
+  };
+}
+
+/**
+ * Couche de couleur d'un rectangle de cellules, échantillonnée trois fois
+ * plus finement que la grille. Classer les biomes sur ce maillage à partir
+ * d'un relief interpolé supprime l'aspect « escalier » des côtes et des
+ * lisières : les frontières deviennent des courbes.
+ */
+function buildColorImage(terrain, cx0, cy0, cw, ch) {
+  const { cols, rows } = terrain;
+  const lw = cw * SUB, lh = ch * SUB;
+  const img = new ImageData(lw, lh);
   const data = img.data;
   const isWater = new Uint8Array(lw * lh);
 
@@ -3757,9 +4693,9 @@ function paintTerrain(terrain, scale = 1) {
   };
 
   for (let sy = 0; sy < lh; sy++) {
-    const fy = (sy + 0.5) / SUB - 0.5;
+    const fy = cy0 + (sy + 0.5) / SUB - 0.5;
     for (let sx = 0; sx < lw; sx++) {
-      const fx = (sx + 0.5) / SUB - 0.5;
+      const fx = cx0 + (sx + 0.5) / SUB - 0.5;
       const e = sample(terrain.elevation, fx, fy);
       const m = sample(terrain.moisture, fx, fy);
       const d = sample(terrain.detail, fx, fy);
@@ -3767,7 +4703,6 @@ function paintTerrain(terrain, scale = 1) {
       const b = terrain._classify(e, m);
       const info = BIOME_INFO[b];
 
-      // Mélange des deux teintes du biome selon le micro-relief.
       let r = lerp(info.color2[0], info.color[0], d);
       let g = lerp(info.color2[1], info.color[1], d);
       let bl = lerp(info.color2[2], info.color[2], d);
@@ -3796,7 +4731,7 @@ function paintTerrain(terrain, scale = 1) {
   }
 
   // Écume : les pixels d'eau bordant la terre sont éclaircis. Traitée dans
-  // l'image plutôt qu'au trait, l'écume suit exactement la côte.
+  // l'image plutôt qu'au trait, elle suit exactement la côte.
   for (let sy = 1; sy < lh - 1; sy++) {
     for (let sx = 1; sx < lw - 1; sx++) {
       const i = sy * lw + sx;
@@ -3808,67 +4743,53 @@ function paintTerrain(terrain, scale = 1) {
       data[o + 2] = lerp(data[o + 2], 255, 0.34);
     }
   }
-  lowCtx.putImageData(img, 0, 0);
+  return img;
+}
 
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(low, 0, 0, W, H);
+/**
+ * Décors d'une cellule. Le générateur aléatoire est dérivé des coordonnées :
+ * une cellule redessinée dix ans plus tard retrouve exactement ses arbres.
+ */
+function drawCellDecor(ctx, terrain, cx, cy, px) {
+  const i = cy * terrain.cols + cx;
+  const b = terrain.biome[i];
+  if (b <= BIOME.WATER) return;
 
-  // --- 2. décors -----------------------------------------------------------
-  const rng = new Rng(terrain.seed ^ 0x5bf03635);
-  const px = cellSize * scale;
+  const rng = new Rng((terrain.seed ^ Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) >>> 0);
+  const x0 = cx * px, y0 = cy * px;
+  const shade = 0.75 + terrain.shade[i] * 0.4;
 
-  for (let cy = 0; cy < rows; cy++) {
-    for (let cx = 0; cx < cols; cx++) {
-      const i = cy * cols + cx;
-      const b = terrain.biome[i];
-      if (b <= BIOME.WATER) continue;
-      const x0 = cx * px, y0 = cy * px;
-      const shade = 0.75 + terrain.shade[i] * 0.4;
-
-      switch (b) {
-        case BIOME.FOREST: {
-          // Densité modérée : au dézoom, une forêt trop fournie masque
-          // complètement le relief et les autres biomes.
-          const n = rng.next() < 0.3 ? 2 : 1;
-          for (let k = 0; k < n; k++) {
-            drawTree(ctx, x0 + rng.range(1, px - 1), y0 + rng.range(1, px - 1),
-              px * rng.range(0.28, 0.44), rng, shade, terrain.moisture[i]);
-          }
-          break;
-        }
-        case BIOME.GRASSLAND:
-          if (rng.next() < 0.07) {
-            drawTree(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2),
-              px * rng.range(0.24, 0.36), rng, shade, terrain.moisture[i]);
-          } else if (rng.next() < 0.5) {
-            drawTuft(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.3, rng, shade);
-          }
-          break;
-        case BIOME.DESERT:
-          if (rng.next() < 0.22) drawDune(ctx, x0, y0, px, rng);
-          else if (rng.next() < 0.05) drawCactus(ctx, x0 + px * 0.5, y0 + px * 0.5, px * 0.4, rng);
-          break;
-        case BIOME.ROCK:
-          if (rng.next() < 0.4) drawRock(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.42), rng, shade);
-          break;
-        case BIOME.SNOW:
-          if (rng.next() < 0.3) drawSnowMound(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.4), rng);
-          break;
-        case BIOME.BEACH:
-          if (rng.next() < 0.16) drawPebble(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.1, rng);
-          break;
+  switch (b) {
+    case BIOME.FOREST: {
+      const n = rng.next() < 0.3 ? 2 : 1;
+      for (let k = 0; k < n; k++) {
+        drawTree(ctx, x0 + rng.range(1, px - 1), y0 + rng.range(1, px - 1),
+          px * rng.range(0.28, 0.44), rng, shade, terrain.moisture[i]);
       }
+      break;
     }
+    case BIOME.GRASSLAND:
+      if (rng.next() < 0.07) {
+        drawTree(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2),
+          px * rng.range(0.24, 0.36), rng, shade, terrain.moisture[i]);
+      } else if (rng.next() < 0.5) {
+        drawTuft(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.3, rng, shade);
+      }
+      break;
+    case BIOME.DESERT:
+      if (rng.next() < 0.22) drawDune(ctx, x0, y0, px, rng);
+      else if (rng.next() < 0.05) drawCactus(ctx, x0 + px * 0.5, y0 + px * 0.5, px * 0.4, rng);
+      break;
+    case BIOME.ROCK:
+      if (rng.next() < 0.4) drawRock(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.42), rng, shade);
+      break;
+    case BIOME.SNOW:
+      if (rng.next() < 0.3) drawSnowMound(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * rng.range(0.2, 0.4), rng);
+      break;
+    case BIOME.BEACH:
+      if (rng.next() < 0.16) drawPebble(ctx, x0 + rng.range(2, px - 2), y0 + rng.range(2, px - 2), px * 0.1, rng);
+      break;
   }
-
-  // --- 3. grain global : casse l'aspect « aplat numérique »
-  applyGrain(ctx, W, H, terrain.seed);
-
-  // Points d'eau échantillonnés pour les reflets animés du rendu temps réel.
-  const waterPoints = collectWaterPoints(terrain);
-
-  return { canvas, waterPoints, scale };
 }
 
 function drawTree(ctx, x, y, r, rng, shade, moisture) {
@@ -3982,8 +4903,8 @@ function drawPebble(ctx, x, y, r, rng) {
   ctx.fill();
 }
 
-/** Bruit monochrome léger appliqué en `overlay` sur toute la carte. */
-function applyGrain(ctx, W, H, seed) {
+/** Tuile de bruit monochrome, appliquée en `overlay` sur le sol. */
+function makeGrainTile(seed) {
   const tileSize = 128;
   const tile = document.createElement('canvas');
   tile.width = tile.height = tileSize;
@@ -3997,12 +4918,7 @@ function applyGrain(ctx, W, H, seed) {
     img.data[o + 3] = 34;
   }
   tctx.putImageData(img, 0, 0);
-  ctx.save();
-  ctx.globalCompositeOperation = 'overlay';
-  const pattern = ctx.createPattern(tile, 'repeat');
-  ctx.fillStyle = pattern;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
+  return tile;
 }
 
 /** Échantillonne des points d'eau pour les scintillements animés. */
@@ -4289,6 +5205,227 @@ class Particles {
   }
 }
 
+// ── src/render/anatomy.js ─────────────────────────────────────────
+/**
+ * Dessin d'une créature à partir de son génome.
+ *
+ * Chaque gène de morphologie a ici sa traduction graphique : l'élancement
+ * étire le corps, les pattes battent, la carapace se plaque en écailles, les
+ * nageoires s'ouvrent, les cornes se recourbent, la crête se hérisse et le
+ * motif zèbre la peau. Comme ces mêmes gènes pèsent sur la survie, ce qu'on
+ * voit à l'écran *est* ce que la sélection est en train de fabriquer.
+ *
+ * La fonction est partagée par le rendu du monde et par les portraits de
+ * l'interface : une créature ne peut pas se dessiner de deux façons.
+ *
+ * Le contexte doit déjà être translaté sur la créature et tourné dans son
+ * sens de marche (l'axe +x pointe vers l'avant).
+ */
+
+/** Niveaux de détail. */
+const LOD = { DOT: 0, SIMPLE: 1, FULL: 2 };
+
+/**
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {object} g génome
+ * @param {number} r rayon de référence
+ * @param {number} phase phase d'animation
+ * @param {object} opts {detail, hue, sat, light, fine}
+ */
+function drawAnatomy(ctx, g, r, phase, opts) {
+  const detail = opts.detail ?? LOD.FULL;
+  const hue = opts.hue, sat = opts.sat, light = opts.light;
+  const fine = opts.fine !== false && detail === LOD.FULL;
+
+  const elong = g.elongation;
+  const len = r * 1.05 * elong;                 // demi-longueur du corps
+  const wid = (r * 0.88) / Math.sqrt(elong);    // demi-largeur
+  const body = `hsl(${hue} ${sat}% ${light}%)`;
+  const dark = `hsl(${hue} ${sat}% ${Math.max(10, light - 14)}%)`;
+
+  // ── ombre portée
+  ctx.fillStyle = 'rgba(8, 14, 22, 0.28)';
+  ctx.beginPath();
+  ctx.ellipse(r * 0.14, r * 0.42, len * 1.02, wid * 0.72, 0, 0, TAU);
+  ctx.fill();
+
+  const swing = Math.sin(phase * 1.6);
+
+  // ── queue et nageoire caudale
+  const tailLen = len * (1.5 + g.fins * 0.5);
+  ctx.strokeStyle = body;
+  ctx.lineWidth = wid * 0.5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-len * 0.78, 0);
+  ctx.quadraticCurveTo(-tailLen * 0.75, swing * wid * 0.7, -tailLen, swing * wid * 1.15);
+  ctx.stroke();
+
+  if (g.fins > 0.18) {
+    // Caudale : deux lobes qui s'ouvrent avec le gène.
+    const f = g.fins;
+    const tx = -tailLen, ty = swing * wid * 1.15;
+    ctx.fillStyle = `hsla(${hue} ${sat + 12}% ${light + 14}% / 0.8)`;
+    ctx.beginPath();
+    ctx.moveTo(tx + wid * 0.3, ty);
+    ctx.lineTo(tx - wid * 0.9 * f, ty - wid * (0.5 + f * 1.3));
+    ctx.lineTo(tx - wid * 0.35, ty);
+    ctx.lineTo(tx - wid * 0.9 * f, ty + wid * (0.5 + f * 1.3));
+    ctx.closePath();
+    ctx.fill();
+
+    // Dorsale
+    if (detail === LOD.FULL) {
+      ctx.beginPath();
+      ctx.moveTo(-len * 0.1, -wid * 0.8);
+      ctx.lineTo(len * 0.05, -wid * (0.9 + f * 1.5));
+      ctx.lineTo(len * 0.45, -wid * 0.75);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // ── pattes
+  const pairs = Math.max(0, Math.round(g.limbs));
+  if (pairs > 0 && detail >= LOD.SIMPLE) {
+    const legSwing = Math.sin(phase * 2.2) * wid * 0.5;
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    for (let i = 0; i < pairs; i++) {
+      // Réparties de l'épaule à la hanche.
+      const t = pairs === 1 ? 0 : i / (pairs - 1) - 0.5;
+      const lx = t * len * 0.95;
+      const alt = i % 2 === 0 ? 1 : -1;
+      const off = legSwing * alt;
+      ctx.ellipse(lx + off * 0.5, -wid * 0.95, wid * 0.42, wid * 0.2, 0.5, 0, TAU);
+      ctx.ellipse(lx - off * 0.5, wid * 0.95, wid * 0.42, wid * 0.2, -0.5, 0, TAU);
+    }
+    ctx.fill();
+  }
+
+  // ── corps
+  const breathe = Math.sin(phase) * 0.06;
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, len * (1 + breathe), wid * (1 - breathe), 0, 0, TAU);
+  ctx.fill();
+
+  // ── motif de camouflage
+  if (fine && g.pattern > 0.22) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, len, wid, 0, 0, TAU);
+    ctx.clip();
+    ctx.fillStyle = `hsla(${hue} ${Math.min(90, sat + 18)}% ${Math.max(8, light - 20)}% / ${(g.pattern * 0.5).toFixed(2)})`;
+    if (g.pattern > 0.6) {
+      // Rayures : franches, pour les fortes valeurs.
+      const bands = 3 + Math.round(g.pattern * 3);
+      for (let i = 0; i < bands; i++) {
+        const x = -len + ((i + 0.5) / bands) * len * 2;
+        ctx.fillRect(x - len * 0.06, -wid, len * 0.12, wid * 2);
+      }
+    } else {
+      // Taches : plus discrètes.
+      for (let i = 0; i < 5; i++) {
+        const x = -len * 0.7 + (i / 4) * len * 1.4;
+        const y = (i % 2 ? 1 : -1) * wid * 0.38;
+        ctx.beginPath();
+        ctx.ellipse(x, y, wid * 0.28, wid * 0.22, 0, 0, TAU);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // ── ventre clair
+  ctx.fillStyle = `hsla(${hue} ${sat}% ${Math.min(90, light + 24)}% / 0.5)`;
+  ctx.beginPath();
+  ctx.ellipse(-len * 0.08, wid * 0.28, len * 0.72, wid * 0.44, 0, 0, TAU);
+  ctx.fill();
+
+  // ── carapace : écailles plaquées sur le dos
+  if (g.armor > 0.12) {
+    const plates = 2 + Math.round(g.armor * 4);
+    const a = 0.35 + g.armor * 0.5;
+    ctx.strokeStyle = `hsla(${(hue + 200) % 360} 12% ${28 + g.armor * 22}% / ${a.toFixed(2)})`;
+    ctx.lineWidth = wid * (0.16 + g.armor * 0.2);
+    ctx.beginPath();
+    for (let i = 0; i < plates; i++) {
+      const x = -len * 0.75 + (i / (plates - 1 || 1)) * len * 1.4;
+      const h = wid * (0.85 + g.armor * 0.25);
+      ctx.moveTo(x, -h);
+      ctx.quadraticCurveTo(x + len * 0.1, 0, x, h);
+    }
+    ctx.stroke();
+  }
+
+  // ── crête de parade
+  if (fine && g.crest > 0.18) {
+    const spikes = 3 + Math.round(g.crest * 4);
+    ctx.fillStyle = `hsl(${(hue + 42) % 360} ${Math.min(95, sat + 28)}% ${Math.min(78, light + 22)}%)`;
+    ctx.beginPath();
+    for (let i = 0; i < spikes; i++) {
+      const x = -len * 0.5 + (i / (spikes - 1 || 1)) * len * 1.1;
+      const h = wid * (0.5 + g.crest * 1.4) * (1 - Math.abs(i / (spikes - 1 || 1) - 0.5));
+      ctx.moveTo(x - wid * 0.16, -wid * 0.75);
+      ctx.lineTo(x, -wid * 0.75 - h);
+      ctx.lineTo(x + wid * 0.16, -wid * 0.75);
+    }
+    ctx.fill();
+  }
+
+  if (detail < LOD.SIMPLE) return;
+
+  // ── tête
+  const hx = len * 0.86;
+  const hr = wid * 0.66;
+  ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.min(92, light + 8)}%)`;
+  ctx.beginPath();
+  ctx.arc(hx, 0, hr, 0, TAU);
+  ctx.fill();
+
+  // ── cornes
+  if (g.horns > 0.12) {
+    const hl = hr * (0.9 + g.horns * 2.2);
+    ctx.strokeStyle = '#f0e6d2';
+    ctx.lineWidth = Math.max(0.6, hr * (0.2 + g.horns * 0.22));
+    ctx.beginPath();
+    for (const side of [-1, 1]) {
+      ctx.moveTo(hx + hr * 0.1, side * hr * 0.55);
+      ctx.quadraticCurveTo(hx + hl * 0.7, side * hr * (0.9 + g.horns), hx + hl, side * hr * 0.35);
+    }
+    ctx.stroke();
+  }
+
+  if (detail < LOD.FULL) return;
+
+  // ── yeux
+  const eyeR = Math.max(0.7, hr * 0.28);
+  ctx.fillStyle = '#f7fbff';
+  ctx.beginPath();
+  ctx.arc(hx + hr * 0.34, -hr * 0.42, eyeR, 0, TAU);
+  ctx.arc(hx + hr * 0.34, hr * 0.42, eyeR, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#14181f';
+  ctx.beginPath();
+  ctx.arc(hx + hr * 0.44, -hr * 0.42, eyeR * 0.55, 0, TAU);
+  ctx.arc(hx + hr * 0.44, hr * 0.42, eyeR * 0.55, 0, TAU);
+  ctx.fill();
+
+  // ── crocs
+  if (g.carnivory > 0.62) {
+    ctx.fillStyle = '#fff7e8';
+    ctx.beginPath();
+    ctx.moveTo(hx + hr * 0.75, -hr * 0.2);
+    ctx.lineTo(hx + hr * 1.3, 0);
+    ctx.lineTo(hx + hr * 0.75, hr * 0.2);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.lineCap = 'butt';
+}
+
 // ── src/render/renderer.js ────────────────────────────────────────
 /**
  * Rendu de la simulation sur canvas 2D.
@@ -4349,6 +5486,9 @@ class Renderer {
     const painted = paintTerrain(t, 1);
     this.terrainCanvas = painted.canvas;
     this.waterPoints = painted.waterPoints;
+    this.repaintCell = painted.repaintCell;
+    this._minimapStale = false;
+    this._minimapTimer = 0;
 
     this.vegCanvas = document.createElement('canvas');
     this.vegCanvas.width = t.cols;
@@ -4437,6 +5577,7 @@ class Renderer {
     const climate = eco.climate;
     const bounds = camera.visibleBounds();
 
+    this._repaintChangedCells();
     this._consumeEvents(camera);
     if (this.options.particles) {
       this.particles.update(dt);
@@ -4459,6 +5600,7 @@ class Renderer {
 
     if (this.options.vegetation) this._drawVegetation(ctx, dt, climate);
     this._drawWater(ctx, bounds, camera);
+    this._drawStructures(ctx, bounds, camera);
     this._drawCorpses(ctx, bounds, camera);
     this._drawCreatures(ctx, bounds, camera, climate);
     if (this.options.particles) this.particles.draw(ctx, bounds);
@@ -4551,6 +5693,122 @@ class Renderer {
     ctx.restore();
   }
 
+  /**
+   * Repeint les cellules dont le biome a changé (érosion, culture, remblai).
+   * Le budget par image est volontairement bas : la carte se transforme
+   * lentement, et une image ne doit jamais être retardée par le sol.
+   */
+  _repaintChangedCells() {
+    if (!this.repaintCell) return;
+    const cells = this.eco.soil.drainDirty(24);
+    if (!cells) return;
+    const cols = this.eco.terrain.cols;
+    for (let k = 0; k < cells.length; k++) {
+      this.repaintCell(cells[k] % cols, (cells[k] / cols) | 0);
+    }
+    this._minimapStale = true;
+  }
+
+  _drawStructures(ctx, bounds, camera) {
+    const list = this.eco.structures.list;
+    if (!list.length) return;
+    const cs = this.eco.terrain.cellSize;
+    const zoom = camera.zoom;
+    ctx.save();
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (s.x < bounds.minX || s.x > bounds.maxX || s.y < bounds.minY || s.y > bounds.maxY) continue;
+      const info = STRUCTURE_INFO[s.kind];
+      const ruin = s.ruin > 0 ? Math.max(0.25, 1 - s.ruin / 280) : 1;
+
+      if (!s.done) {
+        // Chantier : emprise au sol et jauge d'avancement.
+        const p = s.invested / s.cost;
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = `hsl(${s.hue} 45% 62%)`;
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = Math.max(0.6, 1.2 / zoom);
+        ctx.strokeRect(s.cx * cs + 1, s.cy * cs + 1, cs - 2, cs - 2);
+        ctx.setLineDash([]);
+        ctx.fillStyle = `hsl(${s.hue} 55% 60%)`;
+        ctx.fillRect(s.cx * cs + 2, s.cy * cs + cs - 4, (cs - 4) * p, 2);
+        ctx.globalAlpha = 1;
+        continue;
+      }
+
+      ctx.globalAlpha = ruin;
+      switch (s.kind) {
+        case KIND.FIELD: {
+          // Parcelle cultivée : une tache franche, lisible même de loin,
+          // avec des sillons qui n'apparaissent qu'en approchant.
+          const fx = s.cx * cs, fy = s.cy * cs;
+          ctx.fillStyle = `rgba(${info.color[0]},${info.color[1]},${info.color[2]},0.46)`;
+          ctx.fillRect(fx, fy, cs, cs);
+          ctx.strokeStyle = 'rgba(96, 78, 42, 0.5)';
+          ctx.lineWidth = Math.max(0.5, 1 / zoom);
+          ctx.strokeRect(fx + 0.5, fy + 0.5, cs - 1, cs - 1);
+          if (zoom > 1.2) {
+            ctx.strokeStyle = 'rgba(104, 82, 40, 0.45)';
+            ctx.lineWidth = Math.max(0.6, 1.1 / zoom);
+            ctx.beginPath();
+            for (let k = 1; k < 4; k++) {
+              const y = fy + (k / 4) * cs;
+              ctx.moveTo(fx + 2, y);
+              ctx.lineTo(fx + cs - 2, y);
+            }
+            ctx.stroke();
+          }
+          break;
+        }
+        case KIND.DIKE: {
+          // Muret de pierres.
+          ctx.fillStyle = 'rgba(150, 146, 138, 0.85)';
+          ctx.fillRect(s.cx * cs + 1, s.cy * cs + 1, cs - 2, cs - 2);
+          if (zoom > 0.5) {
+            ctx.fillStyle = 'rgba(196, 192, 184, 0.7)';
+            for (let k = 0; k < 3; k++) {
+              ctx.fillRect(s.cx * cs + 2 + (k % 2) * 5, s.cy * cs + 3 + k * 4, 6, 3);
+            }
+          }
+          break;
+        }
+        case KIND.NEST: {
+          const cxp = s.x, cyp = s.y;
+          const rad = cs * 0.62;
+          ctx.fillStyle = 'rgba(10, 14, 20, 0.32)';
+          ctx.beginPath();
+          ctx.ellipse(cxp + 2, cyp + 3, rad, rad * 0.62, 0, 0, TAU);
+          ctx.fill();
+          // Dôme tressé, teinté de l'espèce
+          ctx.fillStyle = `hsl(${s.hue} 34% 46%)`;
+          ctx.beginPath();
+          ctx.ellipse(cxp, cyp, rad, rad * 0.78, 0, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = `hsl(${s.hue} 40% 62%)`;
+          ctx.beginPath();
+          ctx.ellipse(cxp - rad * 0.2, cyp - rad * 0.22, rad * 0.52, rad * 0.36, 0, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(18, 12, 10, 0.75)';
+          ctx.beginPath();
+          ctx.ellipse(cxp, cyp + rad * 0.22, rad * 0.26, rad * 0.2, 0, 0, TAU);
+          ctx.fill();
+          // Anneau de réserve : un grenier plein se voit de loin.
+          if (s.capacity > 0 && s.store > 1) {
+            const fill = Math.min(1, s.store / s.capacity);
+            ctx.strokeStyle = `rgba(255, 214, 120, ${0.35 + fill * 0.5})`;
+            ctx.lineWidth = Math.max(0.8, 1.6 / zoom);
+            ctx.beginPath();
+            ctx.arc(cxp, cyp, rad * 1.35, -Math.PI / 2, -Math.PI / 2 + fill * TAU);
+            ctx.stroke();
+          }
+          break;
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   _drawCorpses(ctx, bounds, camera) {
     const corpses = this.eco.corpses;
     if (!corpses.length) return;
@@ -4620,79 +5878,13 @@ class Renderer {
     ctx.translate(c.x, c.y);
     ctx.rotate(c.heading);
 
-    // Ombre portée
-    ctx.fillStyle = 'rgba(8, 14, 22, 0.28)';
-    ctx.beginPath();
-    ctx.ellipse(r * 0.15, r * 0.42, r * 1.05, r * 0.62, 0, 0, TAU);
-    ctx.fill();
-
-    const wobble = Math.sin(c.phase) * 0.07;
-    const stretch = c.genome.carnivory > 0.55 ? 1.28 : 1.06;
-
-    if (detail === 2) {
-      // Queue ondulante
-      const tailSwing = Math.sin(c.phase * 1.6) * r * 0.55;
-      ctx.strokeStyle = body;
-      ctx.lineWidth = r * 0.42;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(-r * stretch * 0.8, 0);
-      ctx.quadraticCurveTo(-r * stretch * 1.4, tailSwing * 0.6, -r * stretch * 1.9, tailSwing);
-      ctx.stroke();
-
-      // Pattes / nageoires
-      const legSwing = Math.sin(c.phase * 2.2) * r * 0.4;
-      ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.max(12, light - 12)}%)`;
-      ctx.beginPath();
-      ctx.ellipse(legSwing * 0.4, -r * 0.72, r * 0.42, r * 0.22, 0.5, 0, TAU);
-      ctx.ellipse(-legSwing * 0.4, r * 0.72, r * 0.42, r * 0.22, -0.5, 0, TAU);
-      ctx.fill();
-    }
-
-    // Corps
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, r * stretch * (1 + wobble), r * (0.82 - wobble), 0, 0, TAU);
-    ctx.fill();
-
-    // Ventre plus clair
-    ctx.fillStyle = `hsla(${hue} ${sat}% ${Math.min(88, light + 24)}% / 0.55)`;
-    ctx.beginPath();
-    ctx.ellipse(-r * 0.1, r * 0.22, r * stretch * 0.72, r * 0.42, 0, 0, TAU);
-    ctx.fill();
-
-    if (detail === 2) {
-      // Tête
-      const hx = r * stretch * 0.82;
-      ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.min(92, light + 8)}%)`;
-      ctx.beginPath();
-      ctx.arc(hx, 0, r * 0.56, 0, TAU);
-      ctx.fill();
-
-      // Yeux tournés vers la cible
-      const eyeR = Math.max(0.7, r * 0.17);
-      ctx.fillStyle = '#f7fbff';
-      ctx.beginPath();
-      ctx.arc(hx + r * 0.24, -r * 0.26, eyeR, 0, TAU);
-      ctx.arc(hx + r * 0.24, r * 0.26, eyeR, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#14181f';
-      ctx.beginPath();
-      ctx.arc(hx + r * 0.3, -r * 0.26, eyeR * 0.55, 0, TAU);
-      ctx.arc(hx + r * 0.3, r * 0.26, eyeR * 0.55, 0, TAU);
-      ctx.fill();
-
-      // Crocs des prédateurs
-      if (g.carnivory > 0.62) {
-        ctx.fillStyle = '#fff7e8';
-        ctx.beginPath();
-        ctx.moveTo(hx + r * 0.5, -r * 0.12);
-        ctx.lineTo(hx + r * 0.78, 0);
-        ctx.lineTo(hx + r * 0.5, r * 0.12);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
+    // Toute la morphologie est déléguée : le monde et les portraits de
+    // l'interface dessinent le même animal à partir du même génome.
+    drawAnatomy(ctx, g, r, c.phase, {
+      detail: detail === 2 ? LOD.FULL : LOD.SIMPLE,
+      fine: zoom > 0.9,
+      hue, sat, light,
+    });
 
     // Halo d'état
     if (c.state === STATE.HUNT) {
@@ -4714,7 +5906,8 @@ class Renderer {
       ctx.globalAlpha = c.flash * 0.7;
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.ellipse(0, 0, r * stretch * 1.05, r * 0.9, 0, 0, TAU);
+      // L'emprise du flash suit l'élancement du corps réellement dessiné.
+      ctx.ellipse(0, 0, r * g.elongation * 1.1, r * 0.9, 0, 0, TAU);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -4947,6 +6140,16 @@ class Renderer {
   _drawMinimap(ctx, camera) {
     const { x, y, w, h } = this._minimapRect();
     const t = this.eco.terrain;
+    // La minicarte suit les transformations du sol, sans être redessinée à
+    // chaque cellule modifiée.
+    if (this._minimapStale) {
+      this._minimapTimer = (this._minimapTimer || 0) + 1;
+      if (this._minimapTimer > 30) {
+        this._buildMinimap();
+        this._minimapStale = false;
+        this._minimapTimer = 0;
+      }
+    }
 
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -5273,6 +6476,7 @@ function drawSparkline(canvas, data, color) {
  */
 
 const SHOWN_TRAITS = ['speed', 'vision', 'size', 'metabolism', 'fertility', 'lifespan'];
+const MORPHO_SHOWN = ['elongation', 'limbs', 'armor', 'horns', 'fins', 'crest', 'pattern'];
 
 class Hud {
   constructor(root = document) {
@@ -5302,7 +6506,9 @@ class Hud {
       chartBiomass: root.querySelector('#chartBiomass'),
       dietBars: root.querySelectorAll('#dietBars .bar-row'),
       traitBars: root.querySelector('#traitBars'),
+      morphoBars: root.querySelector('#morphoBars'),
       dynamics: root.querySelector('#dynamicsList'),
+      civ: root.querySelector('#civList'),
     };
 
     this._buildTraitBars();
@@ -5315,20 +6521,29 @@ class Hud {
     for (const b of this.el.dynamics.querySelectorAll('b')) {
       this.dyn[b.dataset.k] = b;
     }
+    this.civ = {};
+    for (const b of this.el.civ.querySelectorAll('b')) {
+      this.civ[b.dataset.k] = b;
+    }
   }
 
   _buildTraitBars() {
-    const frag = document.createDocumentFragment();
     this.traitEls = {};
-    for (const key of SHOWN_TRAITS) {
+    this._fillBars(this.el.traitBars, SHOWN_TRAITS, '#8fd0ff');
+    this._fillBars(this.el.morphoBars, MORPHO_SHOWN, '#c9a6ff');
+  }
+
+  _fillBars(host, keys, color) {
+    const frag = document.createDocumentFragment();
+    for (const key of keys) {
       const t = TRAITS.find((x) => x.key === key);
       const row = document.createElement('div');
       row.className = 'bar-row';
-      row.innerHTML = `<span>${t.icon} ${t.label}</span><div class="bar"><i style="--c:#8fd0ff"></i></div><b>0</b>`;
+      row.innerHTML = `<span>${t.icon} ${t.label}</span><div class="bar"><i style="--c:${color}"></i></div><b>0</b>`;
       frag.appendChild(row);
       this.traitEls[key] = { fill: row.querySelector('i'), value: row.querySelector('b'), trait: t };
     }
-    this.el.traitBars.appendChild(frag);
+    host.appendChild(frag);
   }
 
   /**
@@ -5408,15 +6623,25 @@ class Hud {
       row.querySelector('b').textContent = diets[i];
     });
 
-    for (const key of SHOWN_TRAITS) {
+    for (const key of [...SHOWN_TRAITS, ...MORPHO_SHOWN]) {
       const { fill, value, trait } = this.traitEls[key];
       const avg = this._avgTrait(eco, key);
       const ratio = clamp01((avg - trait.min) / (trait.max - trait.min));
       fill.style.width = `${ratio * 100}%`;
-      value.textContent = key === 'size' || key === 'metabolism' || key === 'fertility'
-        ? avg.toFixed(2)
-        : Math.round(avg);
+      value.textContent = trait.max <= 4.01 ? avg.toFixed(2) : Math.round(avg);
     }
+
+    const civ = this.civ;
+    civ.builders.textContent = s.builders;
+    civ.swimmers.textContent = s.swimmers;
+    civ.nests.textContent = s.nests;
+    civ.fields.textContent = s.fields;
+    civ.dikes.textContent = s.dikes;
+    civ.sites.textContent = s.sites;
+    civ.transformed.textContent = `${(s.transformed * 100).toFixed(1)} %`;
+    let store = 0;
+    for (const n of eco.structures.nests) store += n.store;
+    civ.store.textContent = formatNumber(store);
 
     const d = this.dyn;
     d.births.textContent = Math.round(s.birthsPerMin);
@@ -6192,75 +7417,9 @@ function drawPortrait(ctx, genome, time, opts = {}) {
 
   ctx.rotate(Math.sin(time * 0.5) * 0.12);
 
-  const stretch = genome.carnivory > 0.55 ? 1.28 : 1.06;
-
-  // Ombre
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.beginPath();
-  ctx.ellipse(r * 0.2, r * 0.9, r * 1.1, r * 0.34, 0, 0, TAU);
-  ctx.fill();
-
-  // Queue
-  const swing = Math.sin(phase * 1.6) * r * 0.6;
-  ctx.strokeStyle = body;
-  ctx.lineWidth = r * 0.42;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(-r * stretch * 0.8, 0);
-  ctx.quadraticCurveTo(-r * stretch * 1.4, swing * 0.6, -r * stretch * 1.95, swing);
-  ctx.stroke();
-
-  // Pattes
-  const legSwing = Math.sin(phase * 2.2) * r * 0.42;
-  ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.max(12, light - 12)}%)`;
-  ctx.beginPath();
-  ctx.ellipse(legSwing * 0.4, -r * 0.74, r * 0.44, r * 0.22, 0.5, 0, TAU);
-  ctx.ellipse(-legSwing * 0.4, r * 0.74, r * 0.44, r * 0.22, -0.5, 0, TAU);
-  ctx.fill();
-
-  // Corps
-  const wobble = Math.sin(phase) * 0.07;
-  ctx.fillStyle = body;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, r * stretch * (1 + wobble), r * (0.82 - wobble), 0, 0, TAU);
-  ctx.fill();
-
-  ctx.fillStyle = `hsla(${hue} ${sat}% ${Math.min(88, light + 24)}% / 0.55)`;
-  ctx.beginPath();
-  ctx.ellipse(-r * 0.1, r * 0.22, r * stretch * 0.72, r * 0.42, 0, 0, TAU);
-  ctx.fill();
-
-  // Tête
-  const hx = r * stretch * 0.84;
-  ctx.fillStyle = `hsl(${hue} ${sat}% ${Math.min(92, light + 8)}%)`;
-  ctx.beginPath();
-  ctx.arc(hx, 0, r * 0.58, 0, TAU);
-  ctx.fill();
-
-  // Yeux
-  const eyeR = Math.max(1, r * 0.18);
-  const blink = Math.sin(time * 1.3) > 0.985 ? 0.15 : 1;
-  ctx.fillStyle = '#f7fbff';
-  ctx.beginPath();
-  ctx.ellipse(hx + r * 0.24, -r * 0.27, eyeR, eyeR * blink, 0, 0, TAU);
-  ctx.ellipse(hx + r * 0.24, r * 0.27, eyeR, eyeR * blink, 0, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = '#14181f';
-  ctx.beginPath();
-  ctx.ellipse(hx + r * 0.31, -r * 0.27, eyeR * 0.55, eyeR * 0.55 * blink, 0, 0, TAU);
-  ctx.ellipse(hx + r * 0.31, r * 0.27, eyeR * 0.55, eyeR * 0.55 * blink, 0, 0, TAU);
-  ctx.fill();
-
-  // Crocs
-  if (genome.carnivory > 0.62) {
-    ctx.fillStyle = '#fff7e8';
-    ctx.beginPath();
-    ctx.moveTo(hx + r * 0.5, -r * 0.13);
-    ctx.lineTo(hx + r * 0.82, 0);
-    ctx.lineTo(hx + r * 0.5, r * 0.13);
-    ctx.closePath();
-    ctx.fill();
-  }
+  // Même fonction de dessin que dans le monde : le portrait ne peut pas
+  // montrer une anatomie que la simulation ne rendrait pas.
+  drawAnatomy(ctx, genome, r, phase, { detail: LOD.FULL, fine: true, hue, sat, light });
 
   ctx.restore();
 }
@@ -6271,12 +7430,32 @@ function drawPortrait(ctx, genome, time, opts = {}) {
  * éditeur de création d'espèce avec aperçu animé du génome.
  */
 
-const EDITABLE = ['speed', 'vision', 'size', 'metabolism', 'fertility', 'lifespan', 'carnivory', 'aggression', 'sociability'];
+const EDITABLE = [
+  'speed', 'vision', 'size', 'metabolism', 'fertility', 'lifespan',
+  'elongation', 'limbs', 'armor', 'horns', 'fins', 'crest', 'pattern',
+  'carnivory', 'aggression', 'sociability', 'builder',
+];
 
+/**
+ * Points de départ de l'éditeur. La morphologie fait partie du préréglage :
+ * un prédateur naît élancé et armé, un brouteur trapu et camouflé.
+ */
 const DIET_PRESETS = {
-  herbivore: { carnivory: 0.05, aggression: 0.12, speed: 62, size: 1.0, vision: 130, hue: 120 },
-  omnivore: { carnivory: 0.45, aggression: 0.45, speed: 72, size: 1.15, vision: 150, hue: 42 },
-  carnivore: { carnivory: 0.88, aggression: 0.8, speed: 92, size: 1.5, vision: 190, hue: 8 },
+  herbivore: {
+    carnivory: 0.05, aggression: 0.12, speed: 62, size: 1.0, vision: 130, hue: 120,
+    elongation: 1.0, limbs: 2, armor: 0.25, horns: 0.3, fins: 0.05, crest: 0.15,
+    pattern: 0.45, builder: 0.15,
+  },
+  omnivore: {
+    carnivory: 0.45, aggression: 0.45, speed: 72, size: 1.15, vision: 150, hue: 42,
+    elongation: 1.15, limbs: 2, armor: 0.15, horns: 0.15, fins: 0.15, crest: 0.3,
+    pattern: 0.3, builder: 0.35,
+  },
+  carnivore: {
+    carnivory: 0.88, aggression: 0.8, speed: 92, size: 1.5, vision: 190, hue: 8,
+    elongation: 1.5, limbs: 2, armor: 0.1, horns: 0.1, fins: 0.1, crest: 0.2,
+    pattern: 0.25, builder: 0.05,
+  },
 };
 
 class SpeciesPanel {
@@ -6417,7 +7596,10 @@ class SpeciesPanel {
     const diet = sp.diet;
     card.tag.textContent = DIET_LABEL[diet];
     card.tag.className = `sc-tag ${diet}`;
-    card.gen.textContent = `gén. ${sp.generationMax}`;
+    const builds = this.deps.getEco().structures.countForSpecies(sp.id);
+    card.gen.textContent = sp.archetype.builder > 0.55
+      ? `🏗️ ${builds} ouvrage${builds > 1 ? 's' : ''}`
+      : `gén. ${sp.generationMax}`;
     card.peak.textContent = `pic ${sp.peak}`;
 
     if (card.lastCount !== sp.count || sp.history.length % 4 === 0) {
@@ -6516,7 +7698,7 @@ class SpeciesPanel {
     for (const key of EDITABLE) {
       const { out, trait } = this.sliders[key];
       const v = this.draft[key];
-      out.textContent = trait.max <= 3
+      out.textContent = trait.max <= 4.01
         ? v.toFixed(2)
         : `${Math.round(v)}${trait.unit === 's' ? ' s' : ''}`;
     }
@@ -6559,7 +7741,7 @@ class SpeciesPanel {
  * vitales, génome comparé à l'échelle de l'espèce et état comportemental.
  */
 
-const SHOWN = ['speed', 'vision', 'size', 'metabolism', 'fertility', 'carnivory'];
+const SHOWN = ['speed', 'vision', 'size', 'carnivory', 'limbs', 'armor', 'horns', 'fins', 'crest', 'builder'];
 
 class Inspector {
   constructor(deps) {
@@ -6651,7 +7833,7 @@ class Inspector {
       const { fill, value, trait } = this.traits[key];
       const v = c.genome[key];
       fill.style.width = `${clamp01((v - trait.min) / (trait.max - trait.min)) * 100}%`;
-      value.textContent = trait.max <= 3 ? v.toFixed(2) : Math.round(v);
+      value.textContent = trait.max <= 4.01 ? v.toFixed(2) : Math.round(v);
     }
 
     const target = c.state === 2 && c.prey ? ' → proie repérée'
@@ -6886,17 +8068,19 @@ function drainNotices(eco) {
 
 // --------------------------------------------------------------- actions app
 
+// `window.genesis` est exposé dès le chargement du module, donc avant la fin
+// de l'amorçage : ces actions doivent tolérer une interface pas encore prête.
 app.setPaused = (paused) => {
   app.paused = paused;
   accumulator = 0;
-  app.controls.syncPlayback();
+  app.controls?.syncPlayback();
 };
 
 app.setSpeed = (speed) => {
   app.speed = clamp(speed, 1, 1000);
   accumulator = 0;
-  app.controls.syncPlayback();
-  app.savePrefs();
+  app.controls?.syncPlayback();
+  if (app.renderer) app.savePrefs();
 };
 
 app.stepOnce = () => {

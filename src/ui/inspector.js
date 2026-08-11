@@ -7,7 +7,7 @@ import { STATE_LABEL } from '../sim/creature.js';
 import { drawPortrait } from '../render/portrait.js';
 import { clamp01 } from '../core/utils.js';
 
-const SHOWN = ['speed', 'vision', 'size', 'metabolism', 'fertility', 'carnivory'];
+const SHOWN = ['speed', 'vision', 'size', 'carnivory', 'limbs', 'armor', 'horns', 'fins', 'crest', 'builder'];
 
 export class Inspector {
   constructor(deps) {
@@ -99,7 +99,7 @@ export class Inspector {
       const { fill, value, trait } = this.traits[key];
       const v = c.genome[key];
       fill.style.width = `${clamp01((v - trait.min) / (trait.max - trait.min)) * 100}%`;
-      value.textContent = trait.max <= 3 ? v.toFixed(2) : Math.round(v);
+      value.textContent = trait.max <= 4.01 ? v.toFixed(2) : Math.round(v);
     }
 
     const target = c.state === 2 && c.prey ? ' → proie repérée'

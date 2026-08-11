@@ -4,7 +4,7 @@
  */
 import { Ecosystem } from '../src/sim/ecosystem.js';
 import { Terrain, BIOME_INFO } from '../src/world/terrain.js';
-import { breed, randomGenome, geneticDistance, makeGenome, genomeToArray, genomeFromArray } from '../src/sim/genome.js';
+import { breed, randomGenome, geneticDistance, makeGenome, genomeToArray, genomeFromArray, TRAITS } from '../src/sim/genome.js';
 import { Rng } from '../src/core/rng.js';
 
 let passed = 0, failed = 0;
@@ -122,8 +122,13 @@ const DT = 1 / 30;
 const STEPS = 9000; // ≈ 5 minutes de temps simulé
 const t0 = Date.now();
 const samples = [];
+let capSamples = 0, capHits = 0;
 for (let i = 0; i < STEPS; i++) {
   eco.step(DT);
+  if (i % 120 === 0) {
+    capSamples++;
+    if (eco.creatures.length >= eco.options.maxPopulation - 5) capHits++;
+  }
   if (i % 900 === 0) {
     samples.push({
       t: Math.round(eco.time),
@@ -156,15 +161,62 @@ test('L\'évolution produit des générations successives', () => {
 });
 
 test('La chaîne alimentaire reste fonctionnelle', () => {
-  // La régulation par densité locale doit empêcher qu'une seule espèce
-  // monopolise le monde et étouffe les prédateurs.
   assert(eco.deathCauses['prédation'] > 0, 'aucune prédation sur toute la simulation');
   const shares = new Map();
   for (const c of eco.creatures) shares.set(c.speciesId, (shares.get(c.speciesId) || 0) + 1);
   const dominant = Math.max(...shares.values()) / eco.creatures.length;
   assert(dominant < 0.98, `monoculture : une espèce représente ${(dominant * 100).toFixed(0)}% de la population`);
-  const capRatio = eco.creatures.length / eco.options.maxPopulation;
-  assert(capRatio < 0.98, `population collée au plafond (${(capRatio * 100).toFixed(0)}%)`);
+});
+
+test('C\'est la densité locale qui régule, pas le plafond de sécurité', () => {
+  // Le plafond global n'est qu'un garde-fou de performance : s'il devient la
+  // contrainte dominante, la régulation écologique ne fait plus son travail.
+  const ratio = capHits / capSamples;
+  assert(ratio < 0.6, `population au plafond ${(ratio * 100).toFixed(0)}% du temps`);
+});
+
+test('Les bâtisseurs transforment la carte', () => {
+  const built = eco.structures.countByKind();
+  assert(eco.structures.count > 0, 'aucun ouvrage entrepris');
+  assert(built.nest > 0, 'aucun nid achevé');
+  for (const st of eco.structures.list) {
+    assert(st.cx >= 0 && st.cx < eco.terrain.cols, 'ouvrage hors carte en X');
+    assert(st.cy >= 0 && st.cy < eco.terrain.rows, 'ouvrage hors carte en Y');
+    assert(st.invested >= 0, 'investissement négatif');
+    assert(st.store >= 0 && st.store <= st.capacity + 1e-6, `réserve invalide (${st.store})`);
+  }
+  // Les cellules occupées par un ouvrage sont uniques.
+  assert(eco.structures.byCell.size === eco.structures.list.length, 'deux ouvrages sur la même cellule');
+});
+
+test('Le sol évolue sans diverger', () => {
+  const { richness } = eco.soil;
+  let changed = 0;
+  for (let i = 0; i < richness.length; i++) {
+    assert(richness[i] >= -0.43 && richness[i] <= 0.46, `richesse hors bornes : ${richness[i]}`);
+    if (richness[i] !== 0) changed++;
+  }
+  assert(changed > 0, 'le sol n\'a pas bougé d\'un pouce');
+  assert(eco.soil.transformedRatio >= 0 && eco.soil.transformedRatio <= 1, 'ratio de transformation invalide');
+  // Le biome doit rester cohérent avec la fertilité recalculée.
+  for (let i = 0; i < eco.terrain.count; i++) {
+    assert(eco.terrain.fertility[i] >= 0 && eco.terrain.fertility[i] <= 1, 'fertilité hors bornes');
+  }
+});
+
+test('La morphologie évolue et reste dessinable', () => {
+  const avg = (k) => eco.creatures.reduce((s, c) => s + c.genome[k], 0) / eco.creatures.length;
+  for (const key of ['elongation', 'limbs', 'armor', 'horns', 'fins', 'crest', 'pattern', 'builder']) {
+    const t = TRAITS.find((x) => x.key === key);
+    const v = avg(key);
+    assert(v >= t.min && v <= t.max, `${key} moyen hors bornes : ${v}`);
+  }
+  for (const c of eco.creatures) {
+    assert(c.legPairs >= 0 && c.legPairs <= 4, 'nombre de paires de pattes invalide');
+    assert(c.damageResist > 0 && c.damageResist <= 1, 'résistance invalide');
+    assert(c.landSpeedMul > 0 && c.waterSpeedMul > 0, 'coefficient de vitesse invalide');
+    assert(Number.isFinite(c.upkeep) && c.upkeep >= 0, 'entretien invalide');
+  }
 });
 
 test('La végétation ne diverge pas', () => {
@@ -203,6 +255,14 @@ test('Sauvegarde / chargement restitue l\'état', () => {
   assert(Math.abs(a.x - b.x) < 0.2 && Math.abs(a.y - b.y) < 0.2, 'positions divergentes');
   assert(Math.abs(loaded.food.totalBiomass - eco.food.totalBiomass) / eco.food.totalBiomass < 0.02,
     'biomasse divergente');
+  assert(loaded.structures.count === eco.structures.count,
+    `ouvrages perdus : ${loaded.structures.count} au lieu de ${eco.structures.count}`);
+  assert(loaded.structures.countByKind().nest === eco.structures.countByKind().nest, 'nids perdus');
+  let soilDiff = 0;
+  for (let i = 0; i < eco.soil.richness.length; i++) {
+    soilDiff = Math.max(soilDiff, Math.abs(loaded.soil.richness[i] - eco.soil.richness[i]));
+  }
+  assert(soilDiff < 0.01, `sol divergent après rechargement (écart ${soilDiff.toFixed(4)})`);
   // La copie doit pouvoir continuer à tourner.
   for (let i = 0; i < 300; i++) loaded.step(DT);
   assert(loaded.creatures.length > 0, 'la simulation chargée s\'effondre');

@@ -232,17 +232,19 @@ function drainNotices(eco) {
 
 // --------------------------------------------------------------- actions app
 
+// `window.genesis` est exposé dès le chargement du module, donc avant la fin
+// de l'amorçage : ces actions doivent tolérer une interface pas encore prête.
 app.setPaused = (paused) => {
   app.paused = paused;
   accumulator = 0;
-  app.controls.syncPlayback();
+  app.controls?.syncPlayback();
 };
 
 app.setSpeed = (speed) => {
   app.speed = clamp(speed, 1, 1000);
   accumulator = 0;
-  app.controls.syncPlayback();
-  app.savePrefs();
+  app.controls?.syncPlayback();
+  if (app.renderer) app.savePrefs();
 };
 
 app.stepOnce = () => {
