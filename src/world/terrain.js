@@ -56,6 +56,9 @@ export class Terrain {
     this.fertility = new Float32Array(this.count);
     this.shade = new Float32Array(this.count); // relief ombré pré-calculé
     this.detail = new Float32Array(this.count); // variation locale (aspect)
+    // Voies aménagées par les peuples : une modification durable du sol,
+    // qui accélère quiconque l'emprunte — y compris les animaux.
+    this.road = new Uint8Array(this.count);
 
     this.generate();
   }
@@ -214,7 +217,9 @@ export class Terrain {
 
   /** Coefficient de vitesse du sol (0 = infranchissable). */
   speedFactor(worldX, worldY) {
-    return BIOME_INFO[this.biome[this.indexAt(worldX, worldY)]].speed;
+    const i = this.indexAt(worldX, worldY);
+    const base = BIOME_INFO[this.biome[i]].speed;
+    return this.road[i] ? Math.min(1.45, base * 1.5) : base;
   }
 
   /** Cherche une position terrestre valide autour d'un point (spirale). */

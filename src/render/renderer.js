@@ -178,6 +178,7 @@ export class Renderer {
 
     if (this.options.vegetation) this._drawVegetation(ctx, dt, climate);
     this._drawWater(ctx, bounds, camera);
+    this._drawTerritories(ctx, bounds, camera);
     this._drawStructures(ctx, bounds, camera);
     this._drawCorpses(ctx, bounds, camera);
     this._drawCreatures(ctx, bounds, camera, climate);
@@ -190,6 +191,7 @@ export class Renderer {
     if (this.options.dayNight) this._drawDayNight(ctx, climate);
     if (this.options.weather) this._drawWeather(ctx, climate, dt, camera);
     this._drawVignette(ctx);
+    this._drawSettlementLabels(ctx, camera);
     if (this.options.minimap) this._drawMinimap(ctx, camera);
     this._drawSelectionOverlay(ctx, camera);
 
@@ -287,6 +289,91 @@ export class Renderer {
     this._minimapStale = true;
   }
 
+  /**
+   * Territoires et routes commerciales. Dessinés sous les bâtiments : une
+   * cité doit se lire comme une tache d'influence sur la carte, pas comme un
+   * amas d'icônes.
+   */
+  _drawTerritories(ctx, bounds, camera) {
+    const civ = this.eco.civ;
+    if (!civ || !civ.list.length) return;
+    const zoom = camera.zoom;
+    ctx.save();
+
+    // Routes commerciales
+    ctx.lineWidth = Math.max(0.8, 1.6 / zoom);
+    ctx.setLineDash([7, 6]);
+    for (const a of civ.list) {
+      if (a.abandoned) continue;
+      for (const [id, strength] of a.routes) {
+        if (id <= a.id) continue;
+        const b = civ.byId.get(id);
+        if (!b || b.abandoned) continue;
+        ctx.strokeStyle = `hsla(${a.hue} 60% 70% / ${(0.12 + strength * 0.35).toFixed(2)})`;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+
+    // Territoires
+    for (const s of civ.list) {
+      if (s.x < bounds.minX - s.radius || s.x > bounds.maxX + s.radius) continue;
+      if (s.y < bounds.minY - s.radius || s.y > bounds.maxY + s.radius) continue;
+      const ruined = s.abandoned;
+      const hue = ruined ? 220 : s.hue;
+      const grd = ctx.createRadialGradient(s.x, s.y, s.radius * 0.2, s.x, s.y, s.radius);
+      grd.addColorStop(0, `hsla(${hue} ${ruined ? 8 : 62}% 60% / ${ruined ? 0.05 : 0.11})`);
+      grd.addColorStop(1, 'hsla(0 0% 0% / 0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius, 0, TAU);
+      ctx.fill();
+
+      ctx.strokeStyle = `hsla(${hue} ${ruined ? 10 : 65}% 68% / ${ruined ? 0.18 : 0.4})`;
+      ctx.lineWidth = Math.max(0.7, 1.4 / zoom);
+      ctx.setLineDash(ruined ? [3, 7] : [10, 7]);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
+  /** Noms et rangs des cités, en espace écran pour rester lisibles. */
+  _drawSettlementLabels(ctx, camera) {
+    const civ = this.eco.civ;
+    if (!civ || !civ.list.length || camera.zoom < 0.32) return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const s of civ.list) {
+      if (s.abandoned && camera.zoom < 0.7) continue;
+      const p = camera.worldToScreen(s.x, s.y);
+      if (p.x < -80 || p.x > this.width + 80 || p.y < -40 || p.y > this.height + 40) continue;
+      const y = p.y - Math.max(16, s.radius * camera.zoom * 0.55);
+
+      const label = s.abandoned ? `${s.name} · ruines` : s.name;
+      ctx.font = `600 ${s.tier >= 3 ? 13 : 11}px ui-sans-serif, system-ui, sans-serif`;
+      const w = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(8, 12, 20, 0.62)';
+      roundRect(ctx, p.x - w / 2 - 7, y - 10, w + 14, 20, 6);
+      ctx.fill();
+      ctx.fillStyle = s.abandoned ? 'rgba(180,190,205,0.7)' : `hsl(${s.hue} 70% 78%)`;
+      ctx.fillText(label, p.x, y);
+
+      if (!s.abandoned && camera.zoom > 0.55) {
+        ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(200, 212, 228, 0.66)';
+        ctx.fillText(`${s.tierInfo.name} · ${s.population} hab · ${s.techs.size} savoirs`, p.x, y + 15);
+      }
+    }
+    ctx.restore();
+  }
+
   _drawStructures(ctx, bounds, camera) {
     const list = this.eco.structures.list;
     if (!list.length) return;
@@ -347,6 +434,46 @@ export class Renderer {
             for (let k = 0; k < 3; k++) {
               ctx.fillRect(s.cx * cs + 2 + (k % 2) * 5, s.cy * cs + 3 + k * 4, 6, 3);
             }
+          }
+          break;
+        }
+        case KIND.ROAD: {
+          ctx.fillStyle = 'rgba(186, 172, 148, 0.55)';
+          ctx.fillRect(s.cx * cs + 2, s.cy * cs + 2, cs - 4, cs - 4);
+          break;
+        }
+        case KIND.WALL: {
+          ctx.fillStyle = 'rgba(158, 158, 166, 0.92)';
+          ctx.fillRect(s.cx * cs + 1, s.cy * cs + 1, cs - 2, cs - 2);
+          ctx.fillStyle = 'rgba(96, 96, 104, 0.9)';
+          ctx.fillRect(s.cx * cs + 1, s.cy * cs + cs * 0.55, cs - 2, 2);
+          break;
+        }
+        case KIND.HUT:
+        case KIND.GRANARY:
+        case KIND.WORKSHOP:
+        case KIND.MARKET:
+        case KIND.TEMPLE:
+        case KIND.PORT:
+        case KIND.MINE: {
+          // Bâti : une empreinte au sol, un toit teinté du peuple, une ombre.
+          const col = info.color;
+          const bx = s.cx * cs, by = s.cy * cs;
+          ctx.fillStyle = 'rgba(10, 14, 20, 0.3)';
+          ctx.fillRect(bx + 4, by + 5, cs - 5, cs - 6);
+          ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+          ctx.fillRect(bx + 2, by + 3, cs - 5, cs - 6);
+          ctx.fillStyle = `hsl(${s.hue} 45% 52%)`;
+          ctx.beginPath();
+          ctx.moveTo(bx + 1, by + 5);
+          ctx.lineTo(bx + cs * 0.5, by + 1);
+          ctx.lineTo(bx + cs - 3, by + 5);
+          ctx.closePath();
+          ctx.fill();
+          if (zoom > 1.1 && s.capacity > 0 && s.store > 1) {
+            const fill = Math.min(1, s.store / s.capacity);
+            ctx.fillStyle = `rgba(255, 214, 120, 0.8)`;
+            ctx.fillRect(bx + 2, by + cs - 3, (cs - 5) * fill, 1.6);
           }
           break;
         }

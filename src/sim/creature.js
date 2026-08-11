@@ -80,8 +80,14 @@ export class Creature {
       this.radius = 3.2 + genome.size * 5.2;
       this.maxEnergy = 40 + 62 * Math.pow(genome.size, 1.75);
       this.lifespan = genome.lifespan * (rng ? rng.range(0.88, 1.12) : 1);
-      this.maturity = this.lifespan * 0.16;
-      this.senseRadius = Math.min(genome.vision, 260);
+      // Histoire de vie lente chez les prédateurs : maturité tardive et
+      // portées espacées. C'est ce qui amortit les cycles proie-prédateur —
+      // un carnivore qui se reproduit aussi vite que ses proies provoque
+      // des explosions suivies d'effondrements dont rien ne se relève.
+      this.maturity = this.lifespan * (0.16 + genome.carnivory * 0.12);
+      // L'intelligence prolonge la portée utile des sens : reconnaître un
+      // danger de plus loin vaut mieux qu'un œil plus gros.
+      this.senseRadius = Math.min(genome.vision * (0.92 + genome.intellect * 0.3), 280);
       this.plantEfficiency = Math.pow(1 - genome.carnivory, 1.3);
       this.meatEfficiency = 0.3 + 0.7 * Math.pow(genome.carnivory, 0.8);
       this.turnRate = 4.6 - genome.size * 0.75;
@@ -92,10 +98,15 @@ export class Creature {
     this.heading = rng ? rng.range(0, TAU) : 0;
     this.speed = 0;
     this.energy = energy === null ? this.maxEnergy * 0.62 : energy;
+    // Moyenne lente de l'état nutritionnel. La reproduction s'y adosse plutôt
+    // qu'à l'énergie instantanée : sans cette inertie, toute la population se
+    // reproduit au même pic d'abondance, dépasse la capacité du milieu et
+    // s'effondre en bloc. Avec elle, la croissance suit la tendance.
+    this.condition = this.energy / this.maxEnergy;
     this.age = age;
     this.state = STATE.WANDER;
 
-    this.reproCooldown = genome ? 8 / genome.fertility : 10;
+    this.reproCooldown = genome ? (8 + genome.carnivory * 14) / genome.fertility : 10;
     this.mateSearch = 0;
     this.attackCooldown = 0;
     this.wanderAngle = this.heading;
@@ -114,6 +125,11 @@ export class Creature {
     this.flockY = 0;
     this.sepX = 0;
     this.sepY = 0;
+
+    // Cité de rattachement (peuples conscients), mise à jour par la couche
+    // civilisationnelle. Un villageois s'éloigne peu de chez lui.
+    this.settlement = null;
+    this.sapient = false;
 
     // Chantier en cours (espèces bâtisseuses)
     this.buildTarget = null;
@@ -160,6 +176,31 @@ export class Creature {
       g.limbs * 0.022;
 
     this.isBuilder = g.builder > BUILDER_THRESHOLD;
+
+    // L'intelligence se paie avant de rapporter : elle améliore la récolte
+    // et la conduite du corps, mais un cerveau consomme en permanence. C'est
+    // ce compromis qui la maintient basse tant que rien ne la récompense —
+    // et qui la fait décoller dès qu'une colonie lui donne prise.
+    // Trois bénéfices modestes plutôt qu'un seul décisif : mieux récolter,
+    // mieux se déplacer, mieux voir venir. Un cerveau coûte en permanence,
+    // mais il paie dans assez de situations pour que la sélection le pousse —
+    // sans quoi aucune lignée n'atteindrait jamais le seuil de conscience.
+    this.forageSkill = 0.72 + g.intellect * 0.75;
+    this.moveEfficiency = 1 - g.intellect * 0.16;
+    this.upkeep += g.intellect * 0.1;
+  }
+
+  /**
+   * Protection offerte par la cité : gardes, enceintes, simple nombre.
+   * C'est le mécanisme par lequel une civilisation échappe au cycle
+   * proie-prédateur qui gouverne le reste du vivant — non par décret, mais
+   * parce qu'un prédateur préfère une proie isolée à une proie entourée.
+   */
+  get shelter() {
+    const s = this.settlement;
+    if (!s || s.abandoned) return 0;
+    const walls = s.buildings.wall || 0;
+    return clamp01(0.2 + s.population / 160 + walls * 0.06);
   }
 
   get isAdult() {
@@ -182,6 +223,7 @@ export class Creature {
       this.isAdult &&
       this.reproCooldown <= 0 &&
       this.energy > this.maxEnergy * 0.6 &&
+      this.condition > 0.6 &&
       this.age < this.lifespan * 0.88
     );
   }
@@ -233,9 +275,10 @@ export class Creature {
       }
 
       // Proie : plus petite, et pas de ma propre espèce. Une carapace épaisse
-      // dissuade : le prédateur préfère une cible plus tendre.
+      // dissuade — et une cité peuplée encore davantage.
       if (canHunt && !sameSpecies && seen <= r2 && o.genome.size < g.size * 1.12) {
-        const gain = (seen * (1 + o.genome.armor * 1.4 + o.genome.horns * 0.9)) / (0.4 + o.genome.size);
+        const gain = (seen * (1 + o.genome.armor * 1.4 + o.genome.horns * 0.9 + o.shelter * 3))
+          / (0.4 + o.genome.size);
         if (gain < bestPrey) { bestPrey = gain; this.prey = o; }
       }
 
@@ -390,6 +433,20 @@ export class Creature {
       }
     }
 
+    // 4 ter. Attachement au territoire. Un habitant qui sort des limites de
+    // sa cité est rappelé vers elle : c'est ce qui fait qu'une cité se *voit*
+    // comme un lieu, au lieu d'une espèce diluée sur la carte.
+    if (this.settlement && !this.threat) {
+      const sx = this.settlement.x - this.x, sy = this.settlement.y - this.y;
+      const d = Math.sqrt(sx * sx + sy * sy);
+      const r = this.settlement.radius;
+      if (d > r * 0.75) {
+        const w = 1.5 * clamp01((d - r * 0.75) / r);
+        dx += (sx / d) * w;
+        dy += (sy / d) * w;
+      }
+    }
+
     // 5. Grégarisme (cohésion douce entre congénères).
     if (g.sociability > 0.15 && (this.flockX || this.flockY)) {
       const d = Math.sqrt(this.flockX * this.flockX + this.flockY * this.flockY) || 1;
@@ -509,15 +566,17 @@ export class Creature {
       g.metabolism *
       (0.5 * Math.pow(g.size, 1.55) +
         0.0013 * g.vision * Math.sqrt(g.size) +
-        1.15 * v * v * Math.pow(g.size, 1.25) +
+        1.15 * v * v * Math.pow(g.size, 1.25) * this.moveEfficiency +
         cold * 0.9 * insulation +
         this.upkeep) *
       dt;
     this.energy -= cost;
+    // Inertie nutritionnelle : environ trente secondes de mémoire.
+    this.condition += (this.energy / this.maxEnergy - this.condition) * Math.min(1, dt / 30);
 
     // --- alimentation végétale
     if (this.plantEfficiency > 0.12 && this.energy < this.maxEnergy * 0.985) {
-      const rate = 0.5 * Math.pow(g.size, 1.15) * this.plantEfficiency * dt;
+      const rate = 0.5 * Math.pow(g.size, 1.15) * this.plantEfficiency * this.forageSkill * dt;
       const gained = env.food.consume(this.x, this.y, rate);
       if (gained > 0) {
         this.energy = Math.min(this.maxEnergy, this.energy + gained * this.plantEfficiency);
@@ -538,7 +597,7 @@ export class Creature {
 
     // --- vie de colonie : grenier puis chantier
     if ((env.tick + this.id) % 6 === 0) env.ecosystem.useNest(this, dt * 6);
-    if (this.isBuilder) this._build(dt, env);
+    if (this.isBuilder || this.sapient) this._build(dt, env);
 
     // --- charognage
     if (g.carnivory > 0.3 && this.energy < this.maxEnergy * 0.9) {
@@ -620,7 +679,7 @@ export class Creature {
       * Math.pow(g.size / prey.genome.size, 0.8);
     // La carapace encaisse une part des dégâts, qui est perdue pour tout le
     // monde : le prédateur peine, la proie survit.
-    const dmg = Math.min(prey.energy, power * dt * prey.damageResist);
+    const dmg = Math.min(prey.energy, power * dt * prey.damageResist * (1 - prey.shelter));
     prey.energy -= dmg;
     prey.flash = 1;
     prey.threat = this;

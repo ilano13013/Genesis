@@ -40,6 +40,7 @@ export const TRAITS = [
   { key: 'aggression',  label: 'Agressivité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.6, icon: '💢', family: 'compo' },
   { key: 'sociability', label: 'Sociabilité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.4, icon: '🫂', family: 'compo' },
   { key: 'builder',     label: 'Bâtisseur',    unit: '',    min: 0,   max: 1,   sigma: 0.03, weight: 1.6, icon: '🏗️', family: 'compo' },
+  { key: 'intellect',   label: 'Intelligence', unit: '',    min: 0,   max: 1,   sigma: 0.028, weight: 1.8, icon: '🧠', family: 'compo' },
 
   { key: 'hue',         label: 'Teinte',       unit: '°',   min: 0,   max: 360, sigma: 4,    weight: 0.0, icon: '🎨', family: 'compo' },
 ];
@@ -168,6 +169,7 @@ export function randomGenome(rng, carnivory = null) {
     aggression: c * rng.range(0.5, 1) + rng.range(0, 0.2),
     sociability: rng.range(0.15, 0.9),
     builder: rng.range(0, 0.35),
+    intellect: rng.range(0.05, 0.3),
     hue: hueForDiet(c, rng),
   });
 }

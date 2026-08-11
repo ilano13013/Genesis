@@ -18,6 +18,7 @@ import { Hud } from './ui/hud.js';
 import { Controls } from './ui/controls.js';
 import { SpeciesPanel } from './ui/speciespanel.js';
 import { Inspector } from './ui/inspector.js';
+import { CivPanel } from './ui/civpanel.js';
 import { initToasts, toast } from './ui/toast.js';
 import { prefs } from './persistence/save.js';
 import { hashSeed } from './core/rng.js';
@@ -118,6 +119,10 @@ async function boot() {
     closeModal: () => app.controls.closeModal(),
     onChanged: () => app.controls.syncSettings(),
   });
+  app.civPanel = new CivPanel({
+    getEco: () => app.eco,
+    focusPoint: (x, y) => app.focusPoint(x, y),
+  });
   app.controls = new Controls(app);
 
   if (saved.panelsHidden) document.body.classList.add('panels-hidden');
@@ -217,11 +222,23 @@ function loop(now) {
     paused: app.paused,
   }, realDt);
   app.speciesPanel.update(app.eco, realDt);
+  app.civPanel.update(app.eco, realDt);
   app.speciesPanel.renderPreview(app.time);
   app.inspector.update(realDt, app.time);
 }
 
 function drainNotices(eco) {
+  // La chronique remonte ses événements marquants en notification : c'est
+  // ainsi qu'on apprend qu'une civilisation vient de naître ou de tomber
+  // sans avoir les yeux rivés sur le panneau.
+  for (const e of eco.chronicle.drainPending(2)) {
+    const type = e.kind === 'raid' || e.kind === 'famine' ? 'danger'
+      : e.kind === 'collapse' || e.kind === 'extinction' ? 'warn'
+      : e.kind === 'sapience' || e.kind === 'era' || e.kind === 'schism' ? 'speciation'
+      : 'success';
+    toast(e.text, type, 5200);
+  }
+
   const notices = eco.drainNotices();
   for (const n of notices) {
     if (n.type === 'speciation') toast(n.text, 'speciation', 4200);
@@ -272,6 +289,15 @@ app.toggleFollow = () => {
     app.camera.targetZoom = Math.max(app.camera.targetZoom, 1.6);
     toast('Suivi activé');
   }
+};
+
+/** Centre la caméra sur un point du monde (chronique, liste des cités). */
+app.focusPoint = (x, y) => {
+  if (x === null || y === null) return;
+  app.camera.follow = null;
+  app.camera.x = x;
+  app.camera.y = y;
+  app.camera.targetZoom = Math.max(app.camera.targetZoom, 1.1);
 };
 
 app.focusSpecies = (id) => {

@@ -6,6 +6,8 @@ import { Ecosystem } from '../src/sim/ecosystem.js';
 import { Terrain, BIOME_INFO } from '../src/world/terrain.js';
 import { breed, randomGenome, geneticDistance, makeGenome, genomeToArray, genomeFromArray, TRAITS } from '../src/sim/genome.js';
 import { Rng } from '../src/core/rng.js';
+import { TECH_MAP } from '../src/sim/tech.js';
+import { TIERS } from '../src/sim/settlement.js';
 
 let passed = 0, failed = 0;
 const results = [];
@@ -276,6 +278,73 @@ test('Ajout et suppression d\'espèce', () => {
   eco.removeSpecies(sp.id);
   assert(!eco.species.get(sp.id), 'espèce toujours présente');
   for (const c of eco.creatures) assert(c.speciesId !== sp.id, 'individus orphelins');
+});
+
+// ------------------------------------------------------ Monde autonome
+
+test('Une civilisation émerge et laisse une histoire', () => {
+  const w = new Ecosystem({ seed: 42 });
+  w.seedWorld('civilisations');
+  for (let i = 0; i < 27000; i++) w.step(DT);   // 15 minutes simulées
+
+  assert(w.peoples.list.length > 0, 'aucun peuple ne s\'est éveillé');
+  const people = w.peoples.list[0];
+  assert(people.name && people.name.length > 2, 'peuple sans nom');
+  assert(w.civ.list.length > 0, 'aucune cité fondée');
+  assert(w.chronicle.entries.length > 5, 'chronique vide');
+
+  const kinds = new Set(w.chronicle.entries.map((e) => e.kind));
+  assert(kinds.has('sapience'), 'l\'éveil n\'est pas consigné');
+  assert(kinds.has('founding'), 'aucune fondation consignée');
+
+  for (const e of w.chronicle.entries) {
+    assert(typeof e.text === 'string' && e.text.length > 0, 'entrée sans texte');
+    assert(e.time >= 0, 'entrée hors du temps');
+  }
+});
+
+test('Les techniques respectent leurs prérequis', () => {
+  const w = new Ecosystem({ seed: 42 });
+  w.seedWorld('civilisations');
+  for (let i = 0; i < 27000; i++) w.step(DT);
+  let checked = 0;
+  for (const s of w.civ.list) {
+    for (const id of s.techs) {
+      const tech = TECH_MAP.get(id);
+      assert(tech, `technique inconnue : ${id}`);
+      for (const req of tech.requires) {
+        assert(s.techs.has(req), `${s.name} possède ${id} sans ${req}`);
+      }
+      if (tech.needs) assert(tech.needs(s), `${s.name} possède ${id} sans en remplir la condition`);
+      checked++;
+    }
+  }
+  assert(checked > 0, 'aucune technique découverte : rien à vérifier');
+});
+
+test('Cités et ouvrages restent cohérents', () => {
+  const w = new Ecosystem({ seed: 42 });
+  w.seedWorld('civilisations');
+  for (let i = 0; i < 18000; i++) w.step(DT);
+  for (const s of w.civ.list) {
+    assert(s.population >= 0, 'population négative');
+    assert(s.tier >= 0 && s.tier < TIERS.length, 'rang invalide');
+    assert(s.tier <= s.tierRecord, 'record de rang incohérent');
+    assert(s.knowledge >= 0, 'savoir négatif');
+    assert(s.materials >= 0, 'matériaux négatifs');
+    assert(s.food >= -1e-6 && s.food <= s.foodCapacity + 1e-6, 'réserves hors bornes');
+    for (const [id, strength] of s.routes) {
+      const other = w.civ.byId.get(id);
+      assert(other, `route vers une cité inexistante (${id})`);
+      assert(strength >= 0 && strength <= 1, 'force de route hors bornes');
+      assert(other.routes.has(s.id), 'route non réciproque');
+    }
+  }
+  // Une créature rattachée à une cité doit être de son espèce.
+  for (const c of w.creatures) {
+    if (!c.settlement) continue;
+    assert(c.settlement.speciesId === c.speciesId, 'habitant d\'une autre espèce');
+  }
 });
 
 // ---------------------------------------------------------------- Rapport

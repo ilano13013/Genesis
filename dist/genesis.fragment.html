@@ -306,6 +306,76 @@ body.panels-hidden .topbar { opacity: 0.35; }
 .sc-actions button.rm:hover { background: rgba(239, 100, 97, 0.2); color: #ffb3b1; border-color: rgba(239, 100, 97, 0.35); }
 .hint { font-size: 10.5px; color: var(--text-faint); line-height: 1.5; margin: 10px 0 0; }
 
+/* ── onglets, peuples et chronique ──────────────────────────────────────── */
+.tabs { display: flex; gap: 3px; flex: 1; min-width: 0; }
+.tab {
+  flex: 1; padding: 5px 6px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid transparent; color: var(--text-faint);
+  font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: all 0.18s;
+}
+.tab:hover { color: var(--text-dim); background: rgba(255, 255, 255, 0.05); }
+.tab.active { color: var(--accent); background: rgba(126, 240, 208, 0.12); border-color: rgba(126, 240, 208, 0.28); }
+.tab .count {
+  background: rgba(255, 255, 255, 0.12); color: inherit;
+  padding: 1px 5px; border-radius: 999px; font-size: 9px; margin-left: 3px;
+}
+.tab-panel.hidden { display: none; }
+.civ-grid { grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+.civ-grid .stat-value { font-size: 18px; }
+.era-band {
+  margin: 0 0 12px; padding: 8px 11px; border-radius: var(--radius-sm);
+  background: linear-gradient(100deg, rgba(155, 140, 255, 0.16), rgba(126, 240, 208, 0.08));
+  border: 1px solid rgba(155, 140, 255, 0.24);
+  font-size: 11.5px; color: #cfc6ff; line-height: 1.45;
+}
+
+.people-list { display: flex; flex-direction: column; gap: 8px; }
+.people-card {
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border);
+  border-left: 3px solid var(--sp-color, var(--accent-2));
+  border-radius: var(--radius-sm); padding: 9px 10px;
+  animation: fade-up 0.35s ease both;
+}
+.people-card.gone { opacity: 0.45; filter: grayscale(0.5); }
+.pc-top { display: flex; align-items: center; gap: 8px; }
+.pc-name { font-size: 12.5px; font-weight: 650; flex: 1; }
+.pc-era { font-size: 9.5px; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,0.08); color: var(--text-dim); }
+.pc-meta { margin-top: 4px; font-size: 10px; color: var(--text-faint); }
+.pc-cities { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.pc-city {
+  font-size: 9.5px; padding: 2px 7px; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border); color: var(--text-dim);
+  transition: all 0.15s;
+}
+.pc-city:hover { background: rgba(126, 240, 208, 0.16); color: var(--accent); }
+.pc-city.ruin { opacity: 0.5; text-decoration: line-through; }
+.pc-techs { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 3px; }
+.pc-tech { font-size: 9px; padding: 1px 6px; border-radius: 5px; background: rgba(155,140,255,0.14); color: #cfc6ff; }
+
+.chronicle-filters { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.chronicle-filters button {
+  padding: 3px 8px; font-size: 9.5px; border-radius: 7px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); color: var(--text-faint);
+  transition: all 0.15s;
+}
+.chronicle-filters button.off { opacity: 0.35; }
+.chronicle-filters button:hover { color: var(--text); }
+.chronicle { display: flex; flex-direction: column; gap: 5px; }
+.chron-entry {
+  display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start;
+  padding: 7px 9px; border-radius: 9px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.035); border: 1px solid var(--border);
+  border-left: 3px solid var(--c, var(--border-strong));
+  transition: background 0.15s;
+  animation: fade-up 0.3s ease both;
+}
+.chron-entry:hover { background: rgba(255, 255, 255, 0.08); }
+.chron-icon { font-size: 13px; line-height: 1.3; }
+.chron-text { font-size: 11px; line-height: 1.45; color: var(--text-dim); }
+.chron-time { display: block; font-size: 9px; color: var(--text-faint); margin-top: 2px; }
+
 /* ── inspecteur ─────────────────────────────────────────────────────────── */
 .inspector {
   position: fixed; right: calc(var(--panel-w) + 24px); bottom: 88px;
@@ -756,15 +826,37 @@ kbd {
 <!-- ─────────────────────────────── panneau espèces ──────────────────────── -->
 <aside class="panel panel-right glass" id="panelSpecies">
   <div class="panel-head">
-    <h2>Espèces <span class="count" id="speciesCount">0</span></h2>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="tabSpecies" role="tab">Espèces <span class="count" id="speciesCount">0</span></button>
+      <button class="tab" data-tab="tabCiv" role="tab">Peuples <span class="count" id="peopleCount">0</span></button>
+      <button class="tab" data-tab="tabChronicle" role="tab">Chronique</button>
+    </div>
     <button class="icon-btn small" data-collapse="panelSpecies" title="Réduire">−</button>
   </div>
-  <div class="panel-body">
+
+  <div class="panel-body tab-panel" id="tabSpecies">
     <button class="btn primary block-btn" id="btnAddSpecies">
       <span>＋</span> Introduire une espèce
     </button>
     <div class="species-list" id="speciesList"></div>
     <p class="hint" id="extinctHint"></p>
+  </div>
+
+  <div class="panel-body tab-panel hidden" id="tabCiv">
+    <div class="stat-grid civ-grid">
+      <div class="stat"><span class="stat-label">Cités</span><span class="stat-value" id="civSettlements">0</span></div>
+      <div class="stat"><span class="stat-label">Citadins</span><span class="stat-value" id="civPopulation">0</span></div>
+      <div class="stat"><span class="stat-label">Savoirs</span><span class="stat-value" id="civTechs">0</span></div>
+      <div class="stat"><span class="stat-label">Ruines</span><span class="stat-value" id="civRuins">0</span></div>
+    </div>
+    <p class="era-band" id="civEra">Aucune conscience n'a encore émergé.</p>
+    <div class="people-list" id="peopleList"></div>
+    <p class="hint" id="civHint">Une espèce bâtisseuse, sociable et intelligente peut franchir le seuil de la conscience. Cela ne se produit pas à chaque partie.</p>
+  </div>
+
+  <div class="panel-body tab-panel hidden" id="tabChronicle">
+    <div class="chronicle-filters" id="chronicleFilters"></div>
+    <div class="chronicle" id="chronicleList"></div>
   </div>
 </aside>
 
@@ -898,9 +990,9 @@ kbd {
       </div>
       <div class="field">
         <label for="setCrowding" title="Densité de congénères à partir de laquelle la reproduction se raréfie">
-          Densité tolérée <output id="outCrowding">1.30</output>
+          Densité tolérée <output id="outCrowding">1.05</output>
         </label>
-        <input type="range" id="setCrowding" min="40" max="400" value="130">
+        <input type="range" id="setCrowding" min="40" max="400" value="105">
       </div>
       <label class="switch"><input type="checkbox" id="setRepopulate" checked><span></span>Recolonisation automatique</label>
     </section>
@@ -1371,6 +1463,9 @@ class Terrain {
     this.fertility = new Float32Array(this.count);
     this.shade = new Float32Array(this.count); // relief ombré pré-calculé
     this.detail = new Float32Array(this.count); // variation locale (aspect)
+    // Voies aménagées par les peuples : une modification durable du sol,
+    // qui accélère quiconque l'emprunte — y compris les animaux.
+    this.road = new Uint8Array(this.count);
 
     this.generate();
   }
@@ -1529,7 +1624,9 @@ class Terrain {
 
   /** Coefficient de vitesse du sol (0 = infranchissable). */
   speedFactor(worldX, worldY) {
-    return BIOME_INFO[this.biome[this.indexAt(worldX, worldY)]].speed;
+    const i = this.indexAt(worldX, worldY);
+    const base = BIOME_INFO[this.biome[i]].speed;
+    return this.road[i] ? Math.min(1.45, base * 1.5) : base;
   }
 
   /** Cherche une position terrestre valide autour d'un point (spirale). */
@@ -1573,11 +1670,12 @@ const SLICES = 8; // la grille entière est rafraîchie toutes les 8 étapes
 
 class Food {
   /** @param {import('./terrain.js').Terrain} terrain */
-  constructor(terrain, rng, { energyPerUnit = 36, growthRate = 0.055 } = {}) {
+  constructor(terrain, rng, { energyPerUnit = 36, growthRate = 0.055, reserveRatio = 0.18 } = {}) {
     this.terrain = terrain;
     this.rng = rng;
     this.energyPerUnit = energyPerUnit;
     this.growthRate = growthRate;
+    this.reserveRatio = reserveRatio;
     this.plants = new Float32Array(terrain.count);
     this.slice = 0;
     this.totalBiomass = 0;
@@ -1663,14 +1761,22 @@ class Food {
 
   /**
    * Broute une cellule. Retourne l'énergie effectivement obtenue.
+   *
+   * Une part de la plante est hors d'atteinte du pâturage — racines, rejets,
+   * pousses trop basses. Cette réserve est ce qui empêche l'écosystème de
+   * partir en oscillation de relaxation : sans elle, un troupeau nombreux
+   * rase une parcelle jusqu'au sol, la ressource s'effondre partout en même
+   * temps, et la population avec. Avec elle, la ration par tête diminue
+   * progressivement et la population sature au lieu de s'écrouler.
    * @param {number} amount quantité de densité demandée
    */
   consume(worldX, worldY, amount) {
     const i = this.terrain.indexAt(worldX, worldY);
-    const available = this.plants[i];
+    const reserve = this.terrain.fertility[i] * this.reserveRatio;
+    const available = this.plants[i] - reserve;
     if (available <= 0.001) return 0;
     const taken = available < amount ? available : amount;
-    this.plants[i] = available - taken;
+    this.plants[i] -= taken;
     return taken * this.energyPerUnit;
   }
 
@@ -2124,40 +2230,46 @@ class Soil {
 
 // ── src/sim/structures.js ─────────────────────────────────────────
 /**
- * Ouvrages des espèces bâtisseuses.
+ * Ouvrages : du nid animal au port d'une cité.
  *
- * Une créature dont le gène « bâtisseur » dépasse le seuil consacre une part
- * de son énergie à ériger des ouvrages qui modifient durablement le monde :
+ * Deux régimes cohabitent, et c'est voulu — la civilisation ne remplace pas
+ * la biologie, elle pousse dessus :
  *
- *   - **Nid** — cœur de colonie. Autour de lui, les congénères se reproduisent
- *     malgré l'encombrement : c'est ce qui permet à une espèce bâtisseuse de
- *     vivre dense là où les autres se dispersent.
- *   - **Champ** — enrichit le sol de la parcelle et de ses voisines. Répétés,
- *     les champs font remonter un désert vers la prairie puis la forêt.
- *   - **Digue** — remblaie une cellule d'eau peu profonde : le trait de côte
- *     recule, la carte gagne des terres.
+ *  - une espèce **bâtisseuse mais non consciente** ne connaît que trois
+ *    ouvrages (nid, champ, digue) et les place elle-même, au jugé ;
+ *  - un peuple **conscient** laisse sa cité décider *quoi* construire selon
+ *    ses manques, et l'ouvrier ne fait qu'exécuter. Le geste reste le même :
+ *    une créature dépense son énergie sur un chantier jusqu'à l'achèvement.
  *
- * Champs et digues sont bâtis dans le rayon d'un nid : les colonies dessinent
- * donc des taches cultivées reconnaissables, pas un semis aléatoire.
+ * Aucun bâtiment n'apparaît par décret : il faut une technique qui l'autorise,
+ * des matériaux, un emplacement valide et quelqu'un pour le bâtir.
  */
 
-const KIND = { NEST: 0, FIELD: 1, DIKE: 2 };
+const KIND = {
+  NEST: 0, FIELD: 1, DIKE: 2, HUT: 3, GRANARY: 4, WORKSHOP: 5,
+  MARKET: 6, ROAD: 7, WALL: 8, TEMPLE: 9, PORT: 10, MINE: 11,
+};
 
 const STRUCTURE_INFO = [
-  { key: 'nest',  name: 'Nid',   icon: '🏠', cost: 90,  radius: 3, color: [214, 178, 116] },
-  { key: 'field', name: 'Champ', icon: '🌾', cost: 46,  radius: 1, color: [186, 196, 108] },
-  { key: 'dike',  name: 'Digue', icon: '🧱', cost: 128, radius: 1, color: [176, 172, 164] },
+  { key: 'nest', name: 'Foyer', icon: '🏠', cost: 90, color: [214, 178, 116], store: 300 },
+  { key: 'field', name: 'Champ', icon: '🌾', cost: 46, color: [186, 196, 108] },
+  { key: 'dike', name: 'Digue', icon: '🧱', cost: 128, color: [176, 172, 164] },
+  { key: 'hut', name: 'Habitation', icon: '🛖', cost: 58, color: [198, 160, 112] },
+  { key: 'granary', name: 'Grenier', icon: '🏚️', cost: 86, color: [222, 196, 130], store: 420 },
+  { key: 'workshop', name: 'Atelier', icon: '⚒️', cost: 100, color: [166, 148, 132] },
+  { key: 'market', name: 'Marché', icon: '⚖️', cost: 138, color: [226, 170, 96] },
+  { key: 'road', name: 'Route', icon: '🛣️', cost: 34, color: [172, 156, 132] },
+  { key: 'wall', name: 'Muraille', icon: '🧱', cost: 116, color: [150, 150, 156] },
+  { key: 'temple', name: 'Temple', icon: '🏛️', cost: 210, color: [226, 220, 240] },
+  { key: 'port', name: 'Port', icon: '⚓', cost: 158, color: [140, 176, 200] },
+  { key: 'mine', name: 'Mine', icon: '⛏️', cost: 124, color: [120, 116, 118] },
 ];
 
-/** Rayon cultivé autour d'un nid, en cellules. */
+/** Rayon cultivé autour d'un nid animal, en cellules. */
 const COLONY_CELLS = 9;
-/**
- * Distance à laquelle un bâtisseur se rattache à un nid existant. Trop
- * courte, chacun fonde le sien dès qu'il s'écarte du groupe et la carte se
- * couvre de hameaux ; assez large, une colonie unique s'étend et se cultive.
- */
+/** Distance de rattachement d'un bâtisseur à un nid existant, en cellules. */
 const COLONY_REACH = 30;
-/** Durée de ruine d'un ouvrage dont l'espèce a disparu (secondes). */
+/** Durée de ruine d'un ouvrage sans peuple pour l'entretenir (secondes). */
 const RUIN_TIME = 280;
 
 class Structures {
@@ -2169,9 +2281,9 @@ class Structures {
     this.terrain = terrain;
     this.soil = soil;
     this.list = [];
-    this.byCell = new Map();     // index de cellule -> ouvrage
-    this.nests = [];             // sous-ensemble, pour les recherches de colonie
-    this.built = { nest: 0, field: 0, dike: 0 };
+    this.byCell = new Map();
+    this.nests = [];
+    this.built = Object.create(null);
   }
 
   get count() {
@@ -2195,6 +2307,7 @@ class Structures {
     const idx = this.cellIndex(cx, cy);
     if (this.byCell.has(idx)) return null;
 
+    const info = STRUCTURE_INFO[kind];
     const s = {
       kind,
       cx, cy, idx,
@@ -2203,10 +2316,12 @@ class Structures {
       speciesId: species.id,
       hue: species.hue,
       invested: 0,
-      cost: STRUCTURE_INFO[kind].cost,
-      store: 0,                       // réserve du grenier (nids)
-      capacity: kind === KIND.NEST ? 300 : 0,
+      cost: info.cost,
+      store: 0,
+      capacity: info.store || 0,
       done: false,
+      ruined: false,
+      settlementId: null,
       bornAt: time,
       ruin: 0,
     };
@@ -2217,15 +2332,22 @@ class Structures {
   }
 
   /**
-   * Grenier : les colons rapportent quand ils ont du surplus et puisent
-   * quand ils ont faim. C'est ce qui donne un intérêt *vital* au nid — bâtir
-   * ne sert pas seulement à se reproduire, mais à traverser les disettes et
-   * les hivers que les espèces sans réserve ne passent pas.
-   *
+   * Grenier : les habitants rapportent leur surplus et y puisent quand ils
+   * ont faim. C'est ce qui donne un intérêt *vital* à bâtir — traverser les
+   * disettes et les hivers que les espèces sans réserve ne passent pas.
    * @returns {number} énergie transférée (positive = la créature reçoit)
    */
   trade(nest, creature, dt) {
-    if (!nest.done) return 0;
+    if (!nest.done || nest.capacity <= 0) return 0;
+
+    // Transmission : autour d'un foyer, on apprend où trouver, quand semer,
+    // ce qui se mange. Le gain est proportionnel à l'intelligence — c'est la
+    // rétroaction qui fait décoller ce gène *là où des colonies existent*,
+    // et nulle part ailleurs. Sans elle, un cerveau coûteux ne rembourse
+    // jamais son entretien et la conscience n'émerge pas.
+    const taught = creature.genome.intellect * 0.55 * dt;
+    creature.energy = Math.min(creature.maxEnergy, creature.energy + taught);
+
     const ratio = creature.energy / creature.maxEnergy;
     if (ratio > 0.78 && nest.store < nest.capacity) {
       const give = Math.min(4 * dt, creature.energy * 0.05, nest.capacity - nest.store);
@@ -2242,7 +2364,6 @@ class Structures {
     return 0;
   }
 
-  /** Nombre de nids (achevés ou en chantier) pour une espèce. */
   nestCountFor(speciesId) {
     let n = 0;
     for (const s of this.nests) if (s.speciesId === speciesId) n++;
@@ -2258,9 +2379,7 @@ class Structures {
     if (n >= 0) this.nests.splice(n, 1);
   }
 
-  /**
-   * Apporte de l'énergie à un chantier. Retourne true si l'ouvrage s'achève.
-   */
+  /** Apporte de l'énergie à un chantier. Retourne true s'il s'achève. */
   invest(structure, amount, time) {
     if (structure.done) return false;
     structure.invested += amount;
@@ -2268,14 +2387,14 @@ class Structures {
     structure.done = true;
     structure.doneAt = time;
     this._applyEffect(structure);
-    this.built[STRUCTURE_INFO[structure.kind].key]++;
+    const key = STRUCTURE_INFO[structure.kind].key;
+    this.built[key] = (this.built[key] || 0) + 1;
     return true;
   }
 
   _applyEffect(s) {
     switch (s.kind) {
       case KIND.FIELD:
-        // Le champ enrichit sa parcelle et déborde sur ses voisines.
         this.soil.enrichArea(s.cx, s.cy, 0.3, 1);
         break;
       case KIND.DIKE:
@@ -2284,34 +2403,57 @@ class Structures {
       case KIND.NEST:
         this.soil.enrichArea(s.cx, s.cy, 0.06, 1);
         break;
+      case KIND.ROAD:
+        // Une route est une modification durable du terrain : on y circule
+        // plus vite, et les caravanes suivront d'elles-mêmes ces tracés.
+        this.terrain.road[s.idx] = 1;
+        break;
+      case KIND.PORT:
+        this.soil.enrichArea(s.cx, s.cy, 0.08, 1);
+        break;
     }
   }
 
   // ------------------------------------------------- choix d'un emplacement
 
   /**
-   * Cherche un chantier pour une créature bâtisseuse : soit un chantier déjà
-   * ouvert à proximité (on aide les siens), soit un nouvel emplacement.
-   * @returns {object|null}
+   * Cherche un chantier pour une créature bâtisseuse.
+   * @param {object} civ couche civilisationnelle (null si l'espèce n'est pas consciente)
    */
-  findSite(creature, species, rng, time) {
+  findSite(creature, species, rng, time, civ = null) {
     const t = this.terrain;
     const cx = t.cellX(creature.x);
     const cy = t.cellY(creature.y);
 
-    // 1. Un chantier en cours du même peuple, à portée : on y va.
-    const pending = this._nearestPending(creature, 5);
+    // 1. Un chantier en cours du même peuple, à portée : on va y aider.
+    const pending = this._nearestPending(creature, 6);
     if (pending) return pending;
 
-    // 2. Sans nid à proximité, on en fonde un.
     const nest = this.nearestNest(creature.x, creature.y, creature.speciesId, COLONY_REACH * t.cellSize);
+
+    // 2. Pas de foyer à portée : on en fonde un. C'est le seul acte commun
+    //    aux animaux bâtisseurs et aux peuples conscients.
     if (!nest) {
-      const spot = this._scanFor(cx, cy, 3, (i, bx, by) => this._nestScore(i), rng);
+      const spot = this._scanFor(cx, cy, 3, (i) => this._nestScore(i), rng);
       return spot === null ? null : this.found(KIND.NEST, spot.cx, spot.cy, species, time);
     }
 
-    // 3. Dans la colonie : digue si le gène est fort et l'eau proche,
-    //    champ sinon.
+    // 3. Peuple conscient : la cité a décidé de quoi elle manque.
+    const settlement = civ && nest.settlementId ? civ.byId.get(nest.settlementId) : null;
+    if (settlement && !settlement.abandoned && settlement.plan !== null && settlement.plan !== undefined) {
+      const spot = this._placeFor(settlement.plan, settlement, rng);
+      if (spot) {
+        const built = this.found(settlement.plan, spot.cx, spot.cy, species, time);
+        if (built) {
+          built.settlementId = settlement.id;
+          settlement.materials -= STRUCTURE_INFO[settlement.plan].cost * 0.25;
+          return built;
+        }
+      }
+      return null;
+    }
+
+    // 4. Espèce bâtisseuse ordinaire : champ, ou digue si l'eau est proche.
     const ncx = nest.cx, ncy = nest.cy;
     if (creature.genome.builder > 0.75 && rng.chance(0.35)) {
       const dike = this._scanFor(ncx, ncy, COLONY_CELLS, (i) => this._dikeScore(i), rng);
@@ -2320,6 +2462,33 @@ class Structures {
     const field = this._scanFor(ncx, ncy, COLONY_CELLS, (i) => this._fieldScore(i), rng);
     if (field) return this.found(KIND.FIELD, field.cx, field.cy, species, time);
     return null;
+  }
+
+  /** Emplacement adapté au type de bâtiment voulu par une cité. */
+  _placeFor(kind, s, rng) {
+    const r = s.radiusCells;
+    const near = Math.max(2, Math.round(r * 0.45));
+    switch (kind) {
+      case KIND.FIELD:
+        return this._scanFor(s.cx, s.cy, r, (i) => this._fieldScore(i), rng);
+      case KIND.HUT:
+      case KIND.GRANARY:
+      case KIND.WORKSHOP:
+      case KIND.MARKET:
+      case KIND.TEMPLE:
+        // Le cœur bâti reste compact : une cité se lit comme un centre dense.
+        return this._scanFor(s.cx, s.cy, near, (i) => this._urbanScore(i), rng);
+      case KIND.MINE:
+        return this._scanFor(s.cx, s.cy, r, (i) => this._mineScore(i), rng);
+      case KIND.PORT:
+        return this._scanFor(s.cx, s.cy, r, (i) => this._dikeScore(i), rng);
+      case KIND.WALL:
+        return this._scanFor(s.cx, s.cy, near + 2, (i, x, y) => this._wallScore(i, x, y, s), rng);
+      case KIND.ROAD:
+        return this._roadSpot(s, rng);
+      default:
+        return null;
+    }
   }
 
   _nearestPending(creature, cells) {
@@ -2364,7 +2533,6 @@ class Structures {
   _nestScore(i) {
     const b = this.terrain.biome[i];
     if (b <= BIOME.WATER || b === BIOME.SNOW) return 0;
-    // Un nid veut un sol vivable et un peu de ressource autour.
     return 0.4 + this.terrain.fertility[i];
   }
 
@@ -2376,16 +2544,62 @@ class Structures {
     return room > 0.08 ? room : 0;
   }
 
+  _urbanScore(i) {
+    const b = this.terrain.biome[i];
+    if (b <= BIOME.WATER || b === BIOME.SNOW) return 0;
+    // On bâtit volontiers sur la roche et le sable : la bonne terre se cultive.
+    return b === BIOME.ROCK || b === BIOME.DESERT || b === BIOME.BEACH ? 1.1 : 0.6;
+  }
+
+  _mineScore(i) {
+    const b = this.terrain.biome[i];
+    return b === BIOME.ROCK ? 1.2 : b === BIOME.SNOW ? 0.5 : 0;
+  }
+
+  _wallScore(i, x, y, s) {
+    const b = this.terrain.biome[i];
+    if (b <= BIOME.WATER) return 0;
+    // Sur l'anneau extérieur du cœur bâti.
+    const d = Math.max(Math.abs(x - s.cx), Math.abs(y - s.cy));
+    const want = Math.max(3, Math.round(s.radiusCells * 0.45));
+    return d === want ? 1 : 0;
+  }
+
   _dikeScore(i) {
     const t = this.terrain;
     if (t.biome[i] !== BIOME.WATER) return 0;   // hauts-fonds uniquement
-    // Il faut un appui : au moins une cellule de terre adjacente.
     const cols = t.cols;
     let land = 0;
     for (const j of [i - 1, i + 1, i - cols, i + cols]) {
       if (j >= 0 && j < t.count && t.biome[j] > BIOME.WATER) land++;
     }
     return land > 0 ? 0.5 + land * 0.25 : 0;
+  }
+
+  /**
+   * Une route se pose vers un partenaire commercial : le tracé émerge des
+   * échanges, il n'est pas dessiné à l'avance.
+   */
+  _roadSpot(s, rng) {
+    const t = this.terrain;
+    let target = null;
+    for (const [id, strength] of s.routes) {
+      if (strength > 0.15) { target = id; break; }
+    }
+    const civ = s._civ;
+    const other = target && civ ? civ.byId.get(target) : null;
+    const dirX = other ? Math.sign(other.cx - s.cx) : (rng.chance(0.5) ? 1 : -1);
+    const dirY = other ? Math.sign(other.cy - s.cy) : (rng.chance(0.5) ? 1 : -1);
+
+    for (let step = 1; step <= s.radiusCells; step++) {
+      const x = s.cx + dirX * step;
+      const y = s.cy + dirY * Math.round(step * (other ? Math.abs(other.cy - s.cy) / Math.max(1, Math.abs(other.cx - s.cx)) : 1) * 0.4);
+      const i = t.index(x, y);
+      if (i < 0 || this.byCell.has(i)) continue;
+      if (t.biome[i] <= BIOME.WATER) continue;
+      return { cx: x, cy: y };
+    }
+    return null;
   }
 
   /** Nid le plus proche appartenant à une espèce donnée. */
@@ -2402,11 +2616,11 @@ class Structures {
   }
 
   /**
-   * Confort de nidification en un point : 1 quand on est au pied d'un nid de
-   * son espèce, 0 au-delà de sa portée. Sert à alléger la pression de densité.
+   * Confort de nidification en un point : 1 au pied d'un foyer de son espèce,
+   * 0 au-delà de sa portée. Allège la pression de densité.
    */
   nestComfort(x, y, speciesId) {
-    const reach = STRUCTURE_INFO[KIND.NEST].radius * this.terrain.cellSize * 2.4;
+    const reach = 3 * this.terrain.cellSize * 2.4;
     const nest = this.nearestNest(x, y, speciesId, reach);
     if (!nest) return 0;
     const d = Math.hypot(nest.x - x, nest.y - y);
@@ -2416,7 +2630,7 @@ class Structures {
   // ---------------------------------------------------------------- entretien
 
   /**
-   * Les ouvrages d'une espèce éteinte tombent en ruine et disparaissent.
+   * Les ouvrages d'un peuple disparu tombent en ruine puis s'effacent.
    * Ce que le sol a gagné, lui, reste : la carte garde la trace du passage.
    */
   update(dt, speciesRegistry) {
@@ -2424,16 +2638,16 @@ class Structures {
     for (let i = 0; i < this.list.length; i++) {
       const s = this.list[i];
       const sp = speciesRegistry.get(s.speciesId);
-      if (!sp || sp.count === 0) {
+      if (!sp || sp.count === 0 || s.ruined) {
         s.ruin += dt;
         if (s.ruin > RUIN_TIME) {
           this.byCell.delete(s.idx);
+          if (s.kind === KIND.ROAD) this.terrain.road[s.idx] = 0;
           continue;
         }
       } else if (s.ruin > 0) {
         s.ruin = Math.max(0, s.ruin - dt * 2);
       }
-      // Les vivres se gâtent : un grenier ne remplace pas un territoire.
       if (s.store > 0) s.store = Math.max(0, s.store - dt * 0.5);
       this.list[w++] = s;
     }
@@ -2447,15 +2661,16 @@ class Structures {
   }
 
   countByKind() {
-    const out = { nest: 0, field: 0, dike: 0, chantiers: 0 };
+    const out = { chantiers: 0, ruines: 0 };
+    for (const info of STRUCTURE_INFO) out[info.key] = 0;
     for (const s of this.list) {
       if (!s.done) { out.chantiers++; continue; }
+      if (s.ruined) { out.ruines++; continue; }
       out[STRUCTURE_INFO[s.kind].key]++;
     }
     return out;
   }
 
-  /** Ouvrages d'une espèce, pour l'interface. */
   countForSpecies(speciesId) {
     let n = 0;
     for (const s of this.list) if (s.speciesId === speciesId && s.done) n++;
@@ -2466,27 +2681,1177 @@ class Structures {
     return this.list.map((s) => [
       s.kind, s.cx, s.cy, s.speciesId, Math.round(s.invested),
       s.done ? 1 : 0, Math.round(s.hue), Math.round(s.store),
+      s.settlementId || 0, s.ruined ? 1 : 0,
     ]);
   }
 
-  /** Recharge et réapplique les effets sur le terrain. */
   deserialize(rows, time = 0) {
     this.list.length = 0;
     this.byCell.clear();
     this.nests.length = 0;
-    this.built = { nest: 0, field: 0, dike: 0 };
-    for (const [kind, cx, cy, speciesId, invested, done, hue, store] of rows || []) {
+    this.built = Object.create(null);
+    for (const row of rows || []) {
+      const [kind, cx, cy, speciesId, invested, done, hue, store, settlementId, ruined] = row;
       const s = this.found(kind, cx, cy, { id: speciesId, hue }, time);
       if (!s) continue;
       s.invested = invested;
       s.store = store || 0;
+      s.settlementId = settlementId || null;
+      s.ruined = !!ruined;
       if (done) {
         s.done = true;
-        // Les digues doivent être rejouées : le relief n'est pas sérialisé.
+        // Digues et routes doivent être rejouées : le terrain n'est pas
+        // sérialisé cellule par cellule.
         if (kind === KIND.DIKE) this.soil.reclaim(s.idx);
-        this.built[STRUCTURE_INFO[kind].key]++;
+        if (kind === KIND.ROAD) this.terrain.road[s.idx] = 1;
+        const key = STRUCTURE_INFO[kind].key;
+        this.built[key] = (this.built[key] || 0) + 1;
       }
     }
+  }
+}
+
+// ── src/sim/culture.js ────────────────────────────────────────────
+/**
+ * Peuples : ce que devient une espèce qui franchit le seuil de la conscience.
+ *
+ * Rien n'est écrit d'avance. Une lignée bâtisseuse dont l'intelligence, la
+ * sociabilité et la pulsion de construction dépassent ensemble un seuil cesse
+ * d'être un simple animal grégaire : elle reçoit un nom, une culture, et ses
+ * groupes fondent des cités. Si cette espèce se scinde plus tard, le peuple
+ * fille hérite de la conscience — un schisme.
+ *
+ * Le « caractère » d'un peuple n'est pas tiré au hasard : il se lit dans le
+ * génome moyen de ses membres. Un peuple massif et cornu devient guerrier,
+ * un peuple sociable et bâtisseur devient marchand.
+ */
+
+/** Seuils conjoints de l'éveil. Aucun ne suffit seul. */
+const SAPIENCE = {
+  intellect: 0.5,
+  builder: 0.45,
+  sociability: 0.45,
+};
+
+const ONSET = ['Ka', 'Tor', 'Mel', 'Sar', 'Vhen', 'Ash', 'Dro', 'Ith', 'Nor', 'Bel',
+  'Zar', 'Ulm', 'Cra', 'Hes', 'Yon', 'Pel', 'Rhu', 'Ove', 'Sil', 'Tan'];
+const MIDDLE = ['a', 'e', 'i', 'o', 'u', 'ae', 'ia', 'ou', 'ei', 'au'];
+const CODA = ['ndar', 'rim', 'thas', 'lon', 'vek', 'mir', 'dun', 'ska', 'peth', 'gorn',
+  'seth', 'valt', 'ren', 'khar', 'tia', 'moss', 'lys', 'bran', 'dur', 'nesh'];
+
+const PLACE_PREFIX = ['Haut', 'Val', 'Roche', 'Pierre', 'Bois', 'Rive', 'Mont', 'Clair',
+  'Vieux', 'Grand', 'Fon', 'Bel', 'Sable', 'Gué', 'Cap'];
+const PLACE_SUFFIX = ['combe', 'val', 'bourg', 'ford', 'haven', 'mure', 'garde', 'fonds',
+  'crête', 'anse', 'plaine', 'source', 'porte', 'rive', 'terre'];
+
+const TRAIT_LABELS = {
+  builders: 'Bâtisseurs',
+  traders: 'Marchands',
+  warriors: 'Guerriers',
+  scholars: 'Lettrés',
+  farmers: 'Cultivateurs',
+  sailors: 'Navigateurs',
+  nomads: 'Nomades',
+};
+
+class People {
+  constructor(id, species, time, rng, parent = null) {
+    this.id = id;
+    this.speciesId = species.id;
+    this.name = People.generateName(rng);
+    this.adjective = this.name.slice(0, -1) + 'ites';
+    this.hue = species.hue;
+    this.bornAt = time;
+    this.endedAt = null;
+    this.parentId = parent ? parent.id : null;
+    this.settlements = [];
+    this.knownTechs = new Set(parent ? parent.knownTechs : []);
+    this.character = People.characterOf(species.archetype);
+    // Statistiques cumulées, pour la fiche du peuple.
+    this.peakPopulation = 0;
+    this.foundedCount = 0;
+    this.lostCount = 0;
+  }
+
+  static generateName(rng) {
+    const a = rng.pick(ONSET);
+    const b = rng.chance(0.45) ? rng.pick(MIDDLE) : '';
+    return a + b + rng.pick(CODA);
+  }
+
+  static generatePlaceName(rng) {
+    return rng.chance(0.55)
+      ? `${rng.pick(PLACE_PREFIX)}${rng.pick(PLACE_SUFFIX)}`
+      : `${rng.pick(PLACE_PREFIX)}-${rng.pick(PLACE_SUFFIX)}`;
+  }
+
+  /** Caractère dominant, déduit du génome archétype. */
+  static characterOf(g) {
+    const scores = {
+      warriors: g.aggression * 1.2 + g.horns + g.armor * 0.8,
+      traders: g.sociability * 1.4 + g.speed / 200,
+      builders: g.builder * 1.6,
+      scholars: (g.intellect ?? 0) * 1.5 + g.lifespan / 700,
+      farmers: (1 - g.carnivory) * 1.1 + g.fertility * 0.5,
+      sailors: g.fins * 2,
+      nomads: g.speed / 120 + (1 - g.builder),
+    };
+    let best = 'builders', bestV = -Infinity;
+    for (const [k, v] of Object.entries(scores)) {
+      if (v > bestV) { bestV = v; best = k; }
+    }
+    return best;
+  }
+
+  get characterLabel() {
+    return TRAIT_LABELS[this.character] || 'Bâtisseurs';
+  }
+
+  get alive() {
+    return this.settlements.some((s) => !s.abandoned);
+  }
+
+  serialize() {
+    return {
+      id: this.id, speciesId: this.speciesId, name: this.name, hue: this.hue,
+      bornAt: this.bornAt, endedAt: this.endedAt, parentId: this.parentId,
+      character: this.character, knownTechs: [...this.knownTechs],
+      peakPopulation: this.peakPopulation, foundedCount: this.foundedCount,
+      lostCount: this.lostCount,
+    };
+  }
+}
+
+class PeopleRegistry {
+  constructor() {
+    this.list = [];
+    this.bySpecies = new Map();
+    this.nextId = 1;
+  }
+
+  get(speciesId) {
+    return this.bySpecies.get(speciesId);
+  }
+
+  /**
+   * Une espèce est-elle prête à l'éveil ? Les trois seuils doivent tomber
+   * ensemble : l'intelligence seule ne fait pas une civilisation.
+   */
+  static isSapient(genome) {
+    return genome.intellect >= SAPIENCE.intellect
+      && genome.builder >= SAPIENCE.builder
+      && genome.sociability >= SAPIENCE.sociability;
+  }
+
+  create(species, time, rng, parentPeople = null) {
+    const p = new People(this.nextId++, species, time, rng, parentPeople);
+    this.list.push(p);
+    this.bySpecies.set(species.id, p);
+    return p;
+  }
+
+  /** Retire les peuples dont l'espèce a disparu et dont les cités sont mortes. */
+  prune(speciesRegistry, time) {
+    for (const p of this.list) {
+      if (p.endedAt !== null) continue;
+      const sp = speciesRegistry.get(p.speciesId);
+      const gone = (!sp || sp.count === 0) && !p.settlements.some((s) => !s.abandoned);
+      if (gone) p.endedAt = time;
+    }
+  }
+
+  get living() {
+    return this.list.filter((p) => p.endedAt === null);
+  }
+}
+
+// ── src/sim/tech.js ───────────────────────────────────────────────
+/**
+ * Arbre des savoirs.
+ *
+ * Aucune découverte n'est programmée dans le temps : une cité accumule du
+ * savoir en fonction de sa population, de son intelligence moyenne, de ses
+ * ateliers et de ses partenaires commerciaux, puis découvre une technique
+ * *parmi celles que son état rend accessibles*. Deux parties ne suivront donc
+ * pas le même chemin — une cité côtière ira vers la navigation, une cité de
+ * montagne vers la métallurgie, et une cité isolée stagnera.
+ *
+ * Chaque technique porte :
+ *   - `requires` : techniques préalables ;
+ *   - `needs`    : condition sur le monde (côte, minerai, population…) ;
+ *   - `effects`  : multiplicateurs appliqués à la cité qui la possède ;
+ *   - `unlocks`  : type de bâtiment rendu constructible.
+ */
+
+const ERAS = [
+  { key: 'pierre', name: 'Âge de pierre', color: '#9aa4b2' },
+  { key: 'neolithique', name: 'Néolithique', color: '#9be36a' },
+  { key: 'bronze', name: 'Âge du bronze', color: '#e0a458' },
+  { key: 'fer', name: 'Âge du fer', color: '#c0c6cf' },
+  { key: 'classique', name: 'Âge classique', color: '#9b8cff' },
+];
+
+/**
+ * `needs` reçoit la cité et renvoie un booléen.
+ * `effects` : food, materials, knowledge, capacity, defence, tradeRange,
+ *             storage — tous multiplicatifs (1 = neutre) sauf `defence`
+ *             et `tradeRange` qui s'ajoutent.
+ */
+const TECHS = [
+  // ── Âge de pierre
+  {
+    id: 'feu', name: 'Maîtrise du feu', era: 0, cost: 45, requires: [],
+    effects: { cold: 0.7, knowledge: 1.1 },
+    story: 'La nuit recule autour des foyers.',
+  },
+  {
+    id: 'outils', name: 'Outils de pierre', era: 0, cost: 40, requires: [],
+    effects: { build: 1.35, materials: 1.2 },
+    unlocks: 'workshop',
+    story: 'La pierre taillée prolonge la main.',
+  },
+  {
+    id: 'langage', name: 'Langage articulé', era: 0, cost: 60, requires: [],
+    effects: { knowledge: 1.3, cohesion: 1.2 },
+    story: 'Les récits se transmettent plus vite que les gestes.',
+  },
+
+  // ── Néolithique
+  {
+    id: 'agriculture', name: 'Agriculture', era: 1, cost: 110, requires: ['outils'],
+    effects: { food: 1.4 },
+    unlocks: 'farm',
+    needs: (s) => s.population >= 8,
+    story: 'On cesse de suivre la nourriture : on la fait pousser.',
+  },
+  {
+    id: 'poterie', name: 'Poterie', era: 1, cost: 95, requires: ['feu'],
+    effects: { storage: 1.6 },
+    unlocks: 'granary',
+    story: 'Le grain se garde d\'une saison à l\'autre.',
+  },
+  {
+    id: 'construction', name: 'Charpente', era: 1, cost: 120, requires: ['outils'],
+    effects: { capacity: 1.5, build: 1.2 },
+    unlocks: 'hut',
+    story: 'Des murs, un toit, et la pluie devient un bruit.',
+  },
+  {
+    id: 'elevage', name: 'Élevage', era: 1, cost: 150, requires: ['agriculture'],
+    effects: { food: 1.25, materials: 1.15 },
+    story: 'Le troupeau suit, il ne fuit plus.',
+  },
+
+  // ── Âge du bronze
+  {
+    id: 'metallurgie', name: 'Métallurgie', era: 2, cost: 230, requires: ['feu', 'poterie'],
+    effects: { materials: 1.5, defence: 0.2 },
+    unlocks: 'mine',
+    needs: (s) => s.hasRockNearby,
+    story: 'La roche rend un métal que la pierre ignorait.',
+  },
+  {
+    id: 'roue', name: 'La roue', era: 2, cost: 200, requires: ['construction'],
+    effects: { tradeRange: 260, build: 1.15 },
+    unlocks: 'road',
+    story: 'La distance cesse d\'être une muraille.',
+  },
+  {
+    id: 'ecriture', name: 'Écriture', era: 2, cost: 260, requires: ['langage'],
+    effects: { knowledge: 1.5, diffusion: 1.8 },
+    needs: (s) => s.population >= 20,
+    story: 'La mémoire survit à ceux qui se souviennent.',
+  },
+  {
+    id: 'commerce', name: 'Commerce', era: 2, cost: 220, requires: ['roue'],
+    effects: { trade: 1.6, tradeRange: 180 },
+    unlocks: 'market',
+    story: 'Ce qui manque ici abonde ailleurs.',
+  },
+  {
+    id: 'navigation', name: 'Navigation', era: 2, cost: 250, requires: ['construction'],
+    effects: { tradeRange: 520, food: 1.15 },
+    unlocks: 'port',
+    needs: (s) => s.hasCoast,
+    story: 'La mer devient une route au lieu d\'une fin.',
+  },
+
+  // ── Âge du fer
+  {
+    id: 'fer', name: 'Travail du fer', era: 3, cost: 380, requires: ['metallurgie'],
+    effects: { defence: 0.35, materials: 1.3, build: 1.2 },
+    story: 'Les outils mordent, et les armes aussi.',
+  },
+  {
+    id: 'fortification', name: 'Fortifications', era: 3, cost: 360, requires: ['construction', 'metallurgie'],
+    effects: { defence: 0.5 },
+    unlocks: 'wall',
+    story: 'On décide enfin qui entre.',
+  },
+  {
+    id: 'irrigation', name: 'Irrigation', era: 3, cost: 340, requires: ['agriculture', 'roue'],
+    effects: { food: 1.45, soil: 1.6 },
+    story: 'L\'eau va désormais où on la conduit.',
+  },
+  {
+    id: 'monnaie', name: 'Monnaie', era: 3, cost: 380, requires: ['commerce', 'ecriture'],
+    effects: { trade: 1.8, knowledge: 1.15 },
+    story: 'La valeur tient dans la paume.',
+  },
+  {
+    id: 'astronomie', name: 'Astronomie', era: 3, cost: 400, requires: ['ecriture'],
+    effects: { knowledge: 1.4, food: 1.1 },
+    story: 'Le ciel devient un calendrier.',
+  },
+
+  // ── Âge classique
+  {
+    id: 'philosophie', name: 'Philosophie', era: 4, cost: 560, requires: ['ecriture', 'astronomie'],
+    effects: { knowledge: 1.3, cohesion: 1.5 },
+    unlocks: 'temple',
+    story: 'On se demande enfin pourquoi.',
+  },
+  {
+    id: 'aqueduc', name: 'Aqueduc', era: 4, cost: 620, requires: ['irrigation', 'fortification'],
+    effects: { capacity: 1.6, food: 1.2 },
+    story: 'L\'eau franchit les vallées sans se pencher.',
+  },
+  {
+    id: 'mecanique', name: 'Mécanique', era: 4, cost: 700, requires: ['fer', 'astronomie'],
+    effects: { materials: 1.6, build: 1.5, knowledge: 1.2 },
+    story: 'La force n\'a plus besoin de bras.',
+  },
+];
+
+const TECH_MAP = new Map(TECHS.map((t) => [t.id, t]));
+
+/** Techniques immédiatement accessibles à une cité. */
+function availableTechs(settlement) {
+  const out = [];
+  for (const t of TECHS) {
+    if (settlement.techs.has(t.id)) continue;
+    let ok = true;
+    for (const req of t.requires) {
+      if (!settlement.techs.has(req)) { ok = false; break; }
+    }
+    if (!ok) continue;
+    if (t.needs && !t.needs(settlement)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * Agrège les effets des techniques connues.
+ * Les multiplicateurs se composent, les bonus additifs s'additionnent.
+ */
+function aggregateEffects(techs) {
+  const e = {
+    food: 1, materials: 1, knowledge: 1, capacity: 1, storage: 1,
+    build: 1, trade: 1, cohesion: 1, soil: 1, diffusion: 1, cold: 1,
+    defence: 0, tradeRange: 0,
+  };
+  for (const id of techs) {
+    const t = TECH_MAP.get(id);
+    if (!t || !t.effects) continue;
+    for (const [k, v] of Object.entries(t.effects)) {
+      if (k === 'defence' || k === 'tradeRange') e[k] += v;
+      else e[k] *= v;
+    }
+  }
+  return e;
+}
+
+/** Époque atteinte : la plus avancée dont au moins une technique est connue. */
+function eraOf(techs) {
+  let era = 0;
+  for (const id of techs) {
+    const t = TECH_MAP.get(id);
+    if (t && t.era > era) era = t.era;
+  }
+  return era;
+}
+
+/** Part de l'arbre parcourue, pour l'affichage. */
+function progressOf(techs) {
+  return techs.size / TECHS.length;
+}
+
+// ── src/sim/settlement.js ─────────────────────────────────────────
+/**
+ * Cités : ce que les peuples conscients font du monde.
+ *
+ * Une cité n'a pas de population abstraite. Ses habitants sont les créatures
+ * réellement simulées qui vivent dans son territoire — avec leur génétique,
+ * leurs naissances et leurs morts. Une cité qui grandit, c'est littéralement
+ * des animaux de plus à l'écran ; une cité qui s'effondre, ce sont des morts
+ * qu'on peut aller regarder.
+ *
+ * Tout ce qui suit est conditionnel, jamais programmé dans le temps :
+ *   - le rang dépend du nombre d'habitants ;
+ *   - le savoir s'accumule selon la population, l'intelligence, les ateliers
+ *     et les routes commerciales ;
+ *   - la découverte se tire parmi les techniques que l'état rend accessibles ;
+ *   - les routes se nouent quand deux cités sont à portée ;
+ *   - les raids éclatent quand deux peuples se serrent et que les greniers
+ *     sont vides ;
+ *   - l'abandon survient quand il ne reste personne.
+ *
+ * Une même graine rejouée donne donc la même histoire, mais deux graines n'en
+ * donnent jamais deux semblables.
+ */
+
+/** Rangs successifs. `min` = habitants requis, `radius` en cellules. */
+const TIERS = [
+  { key: 'camp', name: 'Campement', min: 0, radius: 6, slots: 5 },
+  { key: 'hamlet', name: 'Hameau', min: 7, radius: 8, slots: 10 },
+  { key: 'village', name: 'Village', min: 16, radius: 11, slots: 20 },
+  { key: 'town', name: 'Bourg', min: 34, radius: 15, slots: 34 },
+  { key: 'city', name: 'Cité', min: 62, radius: 20, slots: 54 },
+  { key: 'metropolis', name: 'Métropole', min: 105, radius: 26, slots: 80 },
+];
+
+/** Délai avant qu'une cité vidée de ses habitants soit déclarée abandonnée. */
+const ABANDON_DELAY = 130;
+/** Portée de commerce de base, en unités monde. */
+const BASE_TRADE_RANGE = 420;
+
+let NEXT_SETTLEMENT_ID = 1;
+
+class Settlement {
+  constructor(people, nest, terrain, time, rng) {
+    this.id = NEXT_SETTLEMENT_ID++;
+    this.peopleId = people.id;
+    this.speciesId = people.speciesId;
+    this.hue = people.hue;
+    this.name = People.generatePlaceName(rng);
+    this.nest = nest;
+    this.cx = nest.cx;
+    this.cy = nest.cy;
+    this.x = nest.x;
+    this.y = nest.y;
+    this.foundedAt = time;
+    this.abandoned = false;
+    this.abandonedAt = null;
+    this._emptyFor = 0;
+
+    this.population = 0;
+    this.peak = 0;
+    this.tier = 0;
+    this.tierRecord = 0;   // plus haut rang jamais atteint
+    this.knowledge = 0;
+    this.materials = 0;
+    this.techs = new Set(people.knownTechs);
+    this.era = eraOf(this.techs);
+    this.effects = aggregateEffects(this.techs);
+    this.routes = new Map();       // id de cité -> force (0..1)
+    this.buildings = Object.create(null);
+    this.structures = [nest];
+    this.unrest = 0;
+    this.raidCooldown = 40;
+    this.avgIntellect = 0;
+
+    // Contraintes géographiques, figées à la fondation : c'est le lieu qui
+    // décide des chemins techniques ouverts à cette cité.
+    const t = terrain;
+    this.hasCoast = false;
+    this.hasRockNearby = false;
+    for (let dy = -6; dy <= 6 && !(this.hasCoast && this.hasRockNearby); dy++) {
+      for (let dx = -6; dx <= 6; dx++) {
+        const i = t.index(this.cx + dx, this.cy + dy);
+        if (i < 0) continue;
+        const b = t.biome[i];
+        if (b <= BIOME.WATER) this.hasCoast = true;
+        else if (b === BIOME.ROCK || b === BIOME.SNOW) this.hasRockNearby = true;
+      }
+    }
+  }
+
+  get tierInfo() {
+    return TIERS[this.tier];
+  }
+
+  get radiusCells() {
+    return TIERS[this.tier].radius;
+  }
+
+  get radius() {
+    return this.radiusCells * 16;
+  }
+
+  /** Vivres stockés dans les greniers de la cité. */
+  get food() {
+    let sum = 0;
+    for (const s of this.structures) if (s.capacity > 0) sum += s.store;
+    return sum;
+  }
+
+  get foodCapacity() {
+    let sum = 0;
+    for (const s of this.structures) sum += s.capacity;
+    return sum;
+  }
+
+  /** Force militaire : population, défense technologique, murailles. */
+  get might() {
+    const walls = this.buildings.wall || 0;
+    return this.population * (1 + this.effects.defence + walls * 0.12);
+  }
+
+  count(kind) {
+    return this.buildings[kind] || 0;
+  }
+
+  get buildingCount() {
+    let n = 0;
+    for (const k in this.buildings) n += this.buildings[k];
+    return n;
+  }
+
+  /** Enregistre un ouvrage achevé dans la cité. */
+  register(structure) {
+    if (!this.structures.includes(structure)) this.structures.push(structure);
+    const key = STRUCTURE_INFO[structure.kind].key;
+    this.buildings[key] = (this.buildings[key] || 0) + 1;
+  }
+
+  serialize() {
+    return {
+      id: this.id, peopleId: this.peopleId, speciesId: this.speciesId,
+      name: this.name, cx: this.cx, cy: this.cy, hue: this.hue,
+      foundedAt: this.foundedAt, abandoned: this.abandoned, abandonedAt: this.abandonedAt,
+      knowledge: Math.round(this.knowledge), materials: Math.round(this.materials),
+      techs: [...this.techs], peak: this.peak, tier: this.tier,
+    };
+  }
+}
+
+/**
+ * Orchestre l'ensemble des peuples et de leurs cités.
+ * Ne dépend que du modèle : aucun accès au DOM, testable en headless.
+ */
+class Civilisations {
+  /**
+   * @param {import('./ecosystem.js').Ecosystem} eco
+   */
+  constructor(eco) {
+    this.eco = eco;
+    this.list = [];
+    this.byId = new Map();
+    this._tickTimer = 0;
+    this._tradeTimer = 0;
+    this.stats = {
+      peoples: 0, settlements: 0, population: 0, era: 0,
+      techs: 0, routes: 0, ruins: 0,
+    };
+  }
+
+  get living() {
+    return this.list.filter((s) => !s.abandoned);
+  }
+
+  // ------------------------------------------------------------------ éveil
+
+  /**
+   * Une espèce bâtisseuse peut franchir le seuil de la conscience. C'est le
+   * seul point d'entrée vers la civilisation, et il dépend uniquement du
+   * génome — donc de la sélection naturelle qui l'a fabriqué.
+   */
+  checkAwakening(species, time) {
+    const { peoples, chronicle, rng } = this.eco;
+    if (peoples.get(species.id)) return null;
+    if (!species.count) return null;
+    // On juge la population vivante, pas l'archétype de fondation : une
+    // lignée qui s'éveille est une lignée dont les membres, en moyenne, ont
+    // franchi les trois seuils ensemble.
+    if (!PeopleIsSapient({
+      intellect: species.avgIntellect ?? 0,
+      builder: species.avgBuilder ?? 0,
+      sociability: species.avgSocial ?? 0,
+    })) return null;
+
+    const parentPeople = species.parentId ? peoples.get(species.parentId) : null;
+    const people = peoples.create(species, time, rng, parentPeople);
+    species.peopleId = people.id;
+
+    if (parentPeople) {
+      chronicle.add('schism', `Les ${people.name} se séparent des ${parentPeople.name}.`, {
+        time, peopleId: people.id, hue: people.hue,
+      });
+    } else {
+      chronicle.add('sapience',
+        `Éveil des ${people.name} : ${species.name} franchit le seuil de la conscience.`,
+        { time, peopleId: people.id, hue: people.hue });
+    }
+
+    // Les foyers déjà bâtis du temps de l'animalité deviennent les premières
+    // cités du peuple : une civilisation hérite des lieux de ses ancêtres.
+    for (const nest of this.eco.structures.nests) {
+      if (nest.speciesId !== species.id || !nest.done || nest.settlementId) continue;
+      this.found(nest, people, time);
+    }
+    return people;
+  }
+
+  /** Fonde une cité autour d'un nid achevé par un peuple conscient. */
+  found(nest, people, time) {
+    const s = new Settlement(people, nest, this.eco.terrain, time, this.eco.rng);
+    s._civ = this;          // pour tracer les routes vers les partenaires
+    s.plan = null;
+    this.list.push(s);
+    this.byId.set(s.id, s);
+    people.settlements.push(s);
+    people.foundedCount++;
+    nest.settlementId = s.id;
+    s.register(nest);
+    this.eco.chronicle.add('founding',
+      `Fondation de ${s.name} par les ${people.name}.`,
+      { time, x: s.x, y: s.y, peopleId: people.id, settlementId: s.id, hue: s.hue });
+    return s;
+  }
+
+  // ------------------------------------------------------------------ cycle
+
+  /**
+   * Avance la couche civilisationnelle. Volontairement appelée à basse
+   * fréquence : une cité ne change pas d'état soixante fois par seconde, et
+   * la boucle biologique n'a pas à porter ce coût.
+   */
+  update(dt, time) {
+    this._tickTimer += dt;
+    if (this._tickTimer < 1) return;
+    const step = this._tickTimer;
+    this._tickTimer = 0;
+
+    this._recomputePopulations();
+
+    for (const s of this.list) {
+      if (s.abandoned) continue;
+      this._updateSettlement(s, step, time);
+    }
+
+    this._tradeTimer += step;
+    if (this._tradeTimer >= 6) {
+      this._updateTrade(this._tradeTimer, time);
+      this._tradeTimer = 0;
+    }
+
+    this.eco.peoples.prune(this.eco.species, time);
+    this._collectStats();
+  }
+
+  /**
+   * Rattache chaque créature consciente à sa cité. Un seul balayage : les
+   * cités sont peu nombreuses, la boucle reste linéaire en population.
+   */
+  _recomputePopulations() {
+    const living = this.living;
+    for (const s of living) {
+      s.population = 0;
+      s._intellectSum = 0;
+    }
+
+    const creatures = this.eco.creatures;
+    for (let i = 0; i < creatures.length; i++) {
+      const c = creatures[i];
+      c.settlement = null;
+      // Appartenir à un peuple conscient suffit à faire un bâtisseur : la
+      // civilisation transmet le geste que la génétique seule n'assurait pas.
+      c.sapient = !!this.eco.peoples.get(c.speciesId);
+      if (!c.sapient || !living.length) continue;
+      let best = null, bestD = Infinity;
+      for (let k = 0; k < living.length; k++) {
+        const s = living[k];
+        if (s.speciesId !== c.speciesId) continue;
+        const dx = s.x - c.x, dy = s.y - c.y;
+        const d = dx * dx + dy * dy;
+        const r = s.radius;
+        if (d < r * r && d < bestD) { bestD = d; best = s; }
+      }
+      if (best) {
+        best.population++;
+        best._intellectSum += c.genome.intellect;
+        c.settlement = best;
+      }
+    }
+
+    for (const s of living) {
+      s.avgIntellect = s.population ? s._intellectSum / s.population : 0;
+      if (s.population > s.peak) s.peak = s.population;
+    }
+  }
+
+  _updateSettlement(s, dt, time) {
+    const eco = this.eco;
+    const people = eco.peoples.get(s.speciesId) || eco.peoples.list.find((p) => p.id === s.peopleId);
+
+    // ── rang
+    let tier = 0;
+    for (let i = TIERS.length - 1; i >= 0; i--) {
+      if (s.population >= TIERS[i].min) { tier = i; break; }
+    }
+    s.tier = tier;
+    // Seule une promotion *inédite* mérite d'être écrite : une cité qui
+    // oscille autour d'un seuil au gré des saisons remplirait la chronique
+    // de bruit, et noierait les événements qui comptent.
+    if (tier > s.tierRecord) {
+      s.tierRecord = tier;
+      eco.chronicle.add('growth',
+        `${s.name} devient ${TIERS[tier].name.toLowerCase()} (${s.population} habitants).`,
+        { time, x: s.x, y: s.y, peopleId: s.peopleId, settlementId: s.id, hue: s.hue });
+    }
+
+    const e = s.effects;
+
+    // ── agriculture
+    // Les champs versent leur récolte dans les greniers, indépendamment de
+    // ce que chaque habitant glane dans la nature. C'est la rupture décisive
+    // avec le reste du vivant : une cité cesse de dépendre du cycle sauvage
+    // de la végétation, et peut donc traverser les crises qui déciment les
+    // espèces alentour. Sans cela, aucune civilisation ne dure assez pour
+    // avoir une histoire.
+    const farms = s.count('field');
+    if (farms > 0) {
+      const season = 0.35 + eco.climate.seasonTemp * 0.9;
+      const soil = eco.terrain.fertility[eco.terrain.index(s.cx, s.cy)] || 0.3;
+      let harvest = farms * 1.15 * e.food * season * (0.5 + soil) * dt;
+      for (const st of s.structures) {
+        if (harvest <= 0) break;
+        if (st.capacity <= 0 || st.store >= st.capacity) continue;
+        const room = st.capacity - st.store;
+        const put = Math.min(room, harvest);
+        st.store += put;
+        harvest -= put;
+      }
+    }
+
+    // ── savoir
+    const routeBonus = 1 + Math.min(0.8, s.routes.size * 0.16);
+    const workshops = s.count('workshop') + s.count('temple') * 0.5;
+    s.knowledge += s.population * s.avgIntellect * 0.05
+      * e.knowledge * routeBonus * (1 + workshops * 0.22) * dt;
+
+    // ── matériaux
+    s.materials += (0.05 + s.count('workshop') * 0.09 + s.count('mine') * 0.14)
+      * e.materials * Math.sqrt(Math.max(1, s.population)) * dt;
+    s.materials = Math.min(s.materials, 400);
+
+    // ── découverte
+    const options = availableTechs(s);
+    if (options.length) {
+      // Les techniques bon marché sortent plus souvent, sans jamais fermer la
+      // porte aux sauts : c'est ce qui rend deux parties divergentes.
+      let affordable = options.filter((t) => s.knowledge >= t.cost);
+      if (affordable.length) {
+        let total = 0;
+        for (const t of affordable) total += 1 / t.cost;
+        let r = eco.rng.next() * total;
+        let chosen = affordable[0];
+        for (const t of affordable) { r -= 1 / t.cost; if (r <= 0) { chosen = t; break; } }
+        this._discover(s, chosen, people, time);
+      }
+    }
+
+    // ── projet de construction
+    if (s.materials > 20 && s.buildingCount < s.tierInfo.slots) {
+      s.plan = this._chooseBuilding(s);
+    } else {
+      s.plan = null;
+    }
+
+    // ── faim et troubles
+    const hungry = s.food < s.foodCapacity * 0.08;
+    if (hungry && s.population > 4) {
+      s.unrest = Math.min(1, s.unrest + dt * 0.02);
+      if (s.unrest > 0.75 && eco.rng.chance(dt * 0.05)) {
+        eco.chronicle.add('famine',
+          `Famine à ${s.name} : les greniers sont vides.`,
+          { time, x: s.x, y: s.y, peopleId: s.peopleId, settlementId: s.id, hue: s.hue });
+        s.unrest = 0.4;
+      }
+    } else {
+      s.unrest = Math.max(0, s.unrest - dt * 0.03);
+    }
+
+    // ── abandon
+    if (s.population === 0) {
+      s._emptyFor += dt;
+      if (s._emptyFor > ABANDON_DELAY) this._abandon(s, time);
+    } else {
+      s._emptyFor = 0;
+    }
+
+    // ── raids
+    s.raidCooldown -= dt;
+    if (s.raidCooldown <= 0) {
+      s.raidCooldown = 30 + eco.rng.next() * 60;
+      this._maybeRaid(s, time);
+    }
+  }
+
+  _discover(s, tech, people, time) {
+    s.knowledge -= tech.cost;
+    s.techs.add(tech.id);
+    s.effects = aggregateEffects(s.techs);
+    if (people) people.knownTechs.add(tech.id);
+
+    const era = eraOf(s.techs);
+    const isNewEra = era > s.era;
+    s.era = era;
+
+    this.eco.chronicle.add('tech',
+      `${s.name} découvre ${tech.name.toLowerCase()}. ${tech.story}`,
+      { time, x: s.x, y: s.y, peopleId: s.peopleId, settlementId: s.id, hue: s.hue });
+
+    if (isNewEra) {
+      this.eco.chronicle.add('era',
+        `Les ${people ? people.name : 'anciens'} entrent dans l'${ERAS[era].name.toLowerCase()}.`,
+        { time, x: s.x, y: s.y, peopleId: s.peopleId, hue: s.hue });
+    }
+  }
+
+  /**
+   * Choisit le prochain bâtiment selon le manque le plus criant.
+   * C'est un besoin qui décide, pas une file d'attente écrite d'avance.
+   */
+  _chooseBuilding(s) {
+    const pop = Math.max(1, s.population);
+    const wants = [];
+    const has = (t) => s.techs.has(t);
+
+    // Nourriture : la priorité tant que les greniers ne suivent pas.
+    wants.push({ kind: KIND.FIELD, score: 1.4 * (1 - clamp01(s.food / (pop * 6))) + (has('agriculture') ? 0.5 : 0) });
+    if (has('poterie')) {
+      wants.push({ kind: KIND.GRANARY, score: 1.2 * clamp01(1 - s.foodCapacity / (pop * 14)) });
+    }
+    if (has('construction')) {
+      wants.push({ kind: KIND.HUT, score: 0.9 * clamp01(1 - s.count('hut') / (pop / 4)) });
+    }
+    if (has('outils')) {
+      wants.push({ kind: KIND.WORKSHOP, score: 0.85 - s.count('workshop') * 0.12 });
+    }
+    if (has('metallurgie') && s.hasRockNearby) {
+      wants.push({ kind: KIND.MINE, score: 0.8 - s.count('mine') * 0.15 });
+    }
+    if (has('roue')) {
+      wants.push({ kind: KIND.ROAD, score: 0.6 + s.routes.size * 0.2 - s.count('road') * 0.05 });
+    }
+    if (has('commerce')) {
+      wants.push({ kind: KIND.MARKET, score: 0.9 - s.count('market') * 0.3 });
+    }
+    if (has('navigation') && s.hasCoast) {
+      wants.push({ kind: KIND.PORT, score: 0.9 - s.count('port') * 0.4 });
+    }
+    if (has('fortification')) {
+      wants.push({ kind: KIND.WALL, score: 0.5 + s.unrest * 1.2 - s.count('wall') * 0.06 });
+    }
+    if (has('philosophie')) {
+      wants.push({ kind: KIND.TEMPLE, score: 0.7 - s.count('temple') * 0.35 });
+    }
+
+    let best = null, bestScore = 0.05;
+    for (const w of wants) {
+      if (w.score > bestScore) { bestScore = w.score; best = w.kind; }
+    }
+    return best;
+  }
+
+  // --------------------------------------------------------------- commerce
+
+  _updateTrade(dt, time) {
+    const living = this.living;
+    for (const a of living) {
+      const range = BASE_TRADE_RANGE + a.effects.tradeRange;
+      for (const b of living) {
+        if (b.id <= a.id) continue;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const reach = Math.min(range, BASE_TRADE_RANGE + b.effects.tradeRange);
+        if (d > reach) {
+          if (a.routes.has(b.id)) { a.routes.delete(b.id); b.routes.delete(a.id); }
+          continue;
+        }
+        const strength = clamp01(1 - d / reach) * Math.min(1, (a.population + b.population) / 40);
+        if (strength < 0.08) continue;
+
+        const isNew = !a.routes.has(b.id);
+        a.routes.set(b.id, strength);
+        b.routes.set(a.id, strength);
+        if (isNew) {
+          this.eco.chronicle.add('trade',
+            `Une route s'ouvre entre ${a.name} et ${b.name}.`,
+            { time, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, peopleId: a.peopleId, hue: a.hue });
+        }
+
+        // Les biens circulent du plein vers le vide.
+        this._exchangeGoods(a, b, strength, dt);
+        // Et les idées avec eux.
+        this._diffuseTech(a, b, strength, dt, time);
+      }
+    }
+  }
+
+  _exchangeGoods(a, b, strength, dt) {
+    const rate = strength * dt * 0.6;
+    const give = (from, to) => {
+      const donor = from.structures.find((s) => s.capacity > 0 && s.store > s.capacity * 0.7);
+      const receiver = to.structures.find((s) => s.capacity > 0 && s.store < s.capacity * 0.4);
+      if (!donor || !receiver) return;
+      const amount = Math.min(rate * 6, donor.store * 0.2, receiver.capacity - receiver.store);
+      donor.store -= amount;
+      receiver.store += amount * 0.9;   // pertes de transport
+    };
+    give(a, b);
+    give(b, a);
+    const flow = rate * 0.7;
+    a.materials += flow * b.effects.trade;
+    b.materials += flow * a.effects.trade;
+  }
+
+  _diffuseTech(a, b, strength, dt, time) {
+    const chance = strength * dt * 0.02;
+    const spread = (from, to) => {
+      if (!this.eco.rng.chance(chance * from.effects.diffusion)) return;
+      for (const id of from.techs) {
+        if (to.techs.has(id)) continue;
+        const tech = TECH_MAP.get(id);
+        if (!tech) continue;
+        // On n'emprunte que ce qu'on peut comprendre et utiliser.
+        if (tech.requires.some((r) => !to.techs.has(r))) continue;
+        if (tech.needs && !tech.needs(to)) continue;
+        to.techs.add(id);
+        to.effects = aggregateEffects(to.techs);
+        to.era = eraOf(to.techs);
+        const people = this.eco.peoples.list.find((p) => p.id === to.peopleId);
+        if (people) people.knownTechs.add(id);
+        this.eco.chronicle.add('trade',
+          `${to.name} apprend ${tech.name.toLowerCase()} de ${from.name}.`,
+          { time, x: to.x, y: to.y, peopleId: to.peopleId, settlementId: to.id, hue: to.hue });
+        return;
+      }
+    };
+    spread(a, b);
+    spread(b, a);
+  }
+
+  // ---------------------------------------------------------------- conflit
+
+  /**
+   * Un raid n'est pas déclenché par un scénario : il faut un voisin d'un
+   * autre peuple, des territoires qui se touchent, et la faim.
+   */
+  _maybeRaid(s, time) {
+    if (s.population < 6) return;
+    const eco = this.eco;
+    const aggression = eco.species.get(s.speciesId)?.archetype.aggression ?? 0.3;
+    const pressure = s.unrest * 0.8 + aggression * 0.6;
+    if (pressure < 0.45) return;
+
+    let target = null, bestD = Infinity;
+    for (const o of this.living) {
+      if (o.peopleId === s.peopleId || o.population < 3) continue;
+      const dx = o.x - s.x, dy = o.y - s.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < s.radius + o.radius && d < bestD) { bestD = d; target = o; }
+    }
+    if (!target) return;
+    if (!eco.rng.chance(clamp01(pressure - 0.35))) return;
+
+    const attacker = s.might * (0.75 + eco.rng.next() * 0.5);
+    const defender = target.might * (0.85 + eco.rng.next() * 0.5);
+    const won = attacker > defender;
+    const loser = won ? target : s;
+    const winner = won ? s : target;
+
+    // Pertes réelles : on tue des habitants, pas un compteur.
+    const toll = Math.max(1, Math.round(loser.population * (0.12 + eco.rng.next() * 0.16)));
+    let killed = 0;
+    for (const c of eco.creatures) {
+      if (killed >= toll) break;
+      if (c.settlement !== loser || !c.alive) continue;
+      c.alive = false;
+      c.causeOfDeath = 'prédation';
+      killed++;
+    }
+    const spoils = Math.min(loser.materials, 30 + eco.rng.next() * 40);
+    loser.materials -= spoils;
+    winner.materials += spoils * 0.7;
+    loser.unrest = Math.min(1, loser.unrest + 0.3);
+    winner.unrest = Math.max(0, winner.unrest - 0.25);
+
+    eco.chronicle.add('raid',
+      `${winner.name} pille ${loser.name} — ${killed} morts.`,
+      { time, x: loser.x, y: loser.y, peopleId: winner.peopleId, hue: winner.hue });
+  }
+
+  _abandon(s, time) {
+    s.abandoned = true;
+    s.abandonedAt = time;
+    const people = this.eco.peoples.list.find((p) => p.id === s.peopleId);
+    if (people) people.lostCount++;
+    for (const st of s.structures) st.ruined = true;
+    const lived = Math.round((time - s.foundedAt) / 60);
+    if (lived < 2 && s.tierRecord === 0) return;   // un campement sans lendemain
+    this.eco.chronicle.add('collapse',
+      `${s.name} est abandonnée après ${lived} jour(s).`,
+      { time, x: s.x, y: s.y, peopleId: s.peopleId, settlementId: s.id, hue: s.hue });
+
+    if (people && !people.settlements.some((o) => !o.abandoned)) {
+      this.eco.chronicle.add('extinction',
+        `Les ${people.name} n'ont plus de cité. Leur histoire s'arrête ici.`,
+        { time, peopleId: people.id, hue: people.hue });
+    }
+  }
+
+  // -------------------------------------------------------------- statistiques
+
+  _collectStats() {
+    const st = this.stats;
+    st.settlements = 0;
+    st.population = 0;
+    st.ruins = 0;
+    st.era = 0;
+    st.routes = 0;
+    const techs = new Set();
+    for (const s of this.list) {
+      if (s.abandoned) { st.ruins++; continue; }
+      st.settlements++;
+      st.population += s.population;
+      st.routes += s.routes.size;
+      if (s.era > st.era) st.era = s.era;
+      for (const t of s.techs) techs.add(t);
+    }
+    st.routes = Math.round(st.routes / 2);
+    st.techs = techs.size;
+    st.peoples = this.eco.peoples.living.length;
+
+    for (const p of this.eco.peoples.list) {
+      let pop = 0;
+      for (const s of p.settlements) if (!s.abandoned) pop += s.population;
+      if (pop > p.peakPopulation) p.peakPopulation = pop;
+    }
+  }
+
+  /** Cité la plus proche d'un point, pour la sélection à la souris. */
+  pick(x, y) {
+    let best = null, bestD = Infinity;
+    for (const s of this.list) {
+      const dx = s.x - x, dy = s.y - y;
+      const d = dx * dx + dy * dy;
+      if (d < s.radius * s.radius && d < bestD) { bestD = d; best = s; }
+    }
+    return best;
+  }
+
+  serialize() {
+    return this.list.map((s) => s.serialize());
+  }
+}
+
+/** Évite une dépendance circulaire avec culture.js. */
+function PeopleIsSapient(genome) {
+  return genome.intellect >= SAPIENCE.intellect
+    && genome.builder >= SAPIENCE.builder
+    && genome.sociability >= SAPIENCE.sociability;
+}
+
+function resetSettlementIds(v = 1) {
+  NEXT_SETTLEMENT_ID = v;
+}
+
+// ── src/sim/chronicle.js ──────────────────────────────────────────
+/**
+ * Chronique du monde.
+ *
+ * Le simulateur ne raconte rien de lui-même : il se contente d'enregistrer ce
+ * qui arrive. La chronique est donc la seule « narration » du projet, et elle
+ * est entièrement dérivée de l'état — fondations, découvertes, famines,
+ * raids, effondrements. C'est ce qui fait qu'une partie se lit après coup.
+ */
+
+const CHRONICLE_KINDS = {
+  sapience: { icon: '✨', label: 'Éveil', weight: 5 },
+  founding: { icon: '🏛️', label: 'Fondation', weight: 4 },
+  tech: { icon: '💡', label: 'Découverte', weight: 3 },
+  era: { icon: '🌅', label: 'Âge', weight: 5 },
+  trade: { icon: '🐫', label: 'Commerce', weight: 2 },
+  growth: { icon: '📈', label: 'Essor', weight: 2 },
+  famine: { icon: '🍂', label: 'Famine', weight: 3 },
+  raid: { icon: '⚔️', label: 'Conflit', weight: 4 },
+  collapse: { icon: '🕯️', label: 'Effondrement', weight: 5 },
+  schism: { icon: '🧬', label: 'Schisme', weight: 4 },
+  extinction: { icon: '💀', label: 'Extinction', weight: 5 },
+  nature: { icon: '🌍', label: 'Nature', weight: 1 },
+};
+
+const MAX_ENTRIES = 400;
+
+class Chronicle {
+  constructor() {
+    this.entries = [];
+    this.nextId = 1;
+    this._pending = [];   // ce que l'interface n'a pas encore lu
+  }
+
+  /**
+   * @param {string} kind clé de CHRONICLE_KINDS
+   * @param {string} text phrase déjà rédigée
+   * @param {object} [meta] {time, x, y, peopleId, settlementId}
+   */
+  add(kind, text, meta = {}) {
+    const entry = {
+      id: this.nextId++,
+      kind,
+      text,
+      time: meta.time ?? 0,
+      x: meta.x ?? null,
+      y: meta.y ?? null,
+      peopleId: meta.peopleId ?? null,
+      settlementId: meta.settlementId ?? null,
+      hue: meta.hue ?? null,
+    };
+    this.entries.push(entry);
+    if (this.entries.length > MAX_ENTRIES) this.entries.shift();
+    // Seuls les événements marquants remontent en notification.
+    if ((CHRONICLE_KINDS[kind]?.weight ?? 0) >= 3) this._pending.push(entry);
+    return entry;
+  }
+
+  /** Événements notables non encore affichés. */
+  drainPending(limit = 3) {
+    if (this._pending.length === 0) return [];
+    const out = this._pending.slice(-limit);
+    this._pending.length = 0;
+    return out;
+  }
+
+  /** Les `n` derniers événements, du plus récent au plus ancien. */
+  latest(n = 60, kinds = null) {
+    const out = [];
+    for (let i = this.entries.length - 1; i >= 0 && out.length < n; i--) {
+      const e = this.entries[i];
+      if (kinds && !kinds.has(e.kind)) continue;
+      out.push(e);
+    }
+    return out;
+  }
+
+  serialize() {
+    return this.entries.slice(-200).map((e) => [
+      e.kind, e.text, Math.round(e.time), e.x === null ? null : Math.round(e.x),
+      e.y === null ? null : Math.round(e.y), e.peopleId, e.hue === null ? null : Math.round(e.hue),
+    ]);
+  }
+
+  deserialize(rows) {
+    this.entries.length = 0;
+    this.nextId = 1;
+    for (const [kind, text, time, x, y, peopleId, hue] of rows || []) {
+      this.entries.push({
+        id: this.nextId++, kind, text, time, x, y, peopleId, hue, settlementId: null,
+      });
+    }
+    this._pending.length = 0;
   }
 }
 
@@ -2621,6 +3986,7 @@ const TRAITS = [
   { key: 'aggression',  label: 'Agressivité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.6, icon: '💢', family: 'compo' },
   { key: 'sociability', label: 'Sociabilité',  unit: '',    min: 0,   max: 1,   sigma: 0.035, weight: 0.4, icon: '🫂', family: 'compo' },
   { key: 'builder',     label: 'Bâtisseur',    unit: '',    min: 0,   max: 1,   sigma: 0.03, weight: 1.6, icon: '🏗️', family: 'compo' },
+  { key: 'intellect',   label: 'Intelligence', unit: '',    min: 0,   max: 1,   sigma: 0.028, weight: 1.8, icon: '🧠', family: 'compo' },
 
   { key: 'hue',         label: 'Teinte',       unit: '°',   min: 0,   max: 360, sigma: 4,    weight: 0.0, icon: '🎨', family: 'compo' },
 ];
@@ -2749,6 +4115,7 @@ function randomGenome(rng, carnivory = null) {
     aggression: c * rng.range(0.5, 1) + rng.range(0, 0.2),
     sociability: rng.range(0.15, 0.9),
     builder: rng.range(0, 0.35),
+    intellect: rng.range(0.05, 0.3),
     hue: hueForDiet(c, rng),
   });
 }
@@ -2858,8 +4225,14 @@ class Creature {
       this.radius = 3.2 + genome.size * 5.2;
       this.maxEnergy = 40 + 62 * Math.pow(genome.size, 1.75);
       this.lifespan = genome.lifespan * (rng ? rng.range(0.88, 1.12) : 1);
-      this.maturity = this.lifespan * 0.16;
-      this.senseRadius = Math.min(genome.vision, 260);
+      // Histoire de vie lente chez les prédateurs : maturité tardive et
+      // portées espacées. C'est ce qui amortit les cycles proie-prédateur —
+      // un carnivore qui se reproduit aussi vite que ses proies provoque
+      // des explosions suivies d'effondrements dont rien ne se relève.
+      this.maturity = this.lifespan * (0.16 + genome.carnivory * 0.12);
+      // L'intelligence prolonge la portée utile des sens : reconnaître un
+      // danger de plus loin vaut mieux qu'un œil plus gros.
+      this.senseRadius = Math.min(genome.vision * (0.92 + genome.intellect * 0.3), 280);
       this.plantEfficiency = Math.pow(1 - genome.carnivory, 1.3);
       this.meatEfficiency = 0.3 + 0.7 * Math.pow(genome.carnivory, 0.8);
       this.turnRate = 4.6 - genome.size * 0.75;
@@ -2870,10 +4243,15 @@ class Creature {
     this.heading = rng ? rng.range(0, TAU) : 0;
     this.speed = 0;
     this.energy = energy === null ? this.maxEnergy * 0.62 : energy;
+    // Moyenne lente de l'état nutritionnel. La reproduction s'y adosse plutôt
+    // qu'à l'énergie instantanée : sans cette inertie, toute la population se
+    // reproduit au même pic d'abondance, dépasse la capacité du milieu et
+    // s'effondre en bloc. Avec elle, la croissance suit la tendance.
+    this.condition = this.energy / this.maxEnergy;
     this.age = age;
     this.state = STATE.WANDER;
 
-    this.reproCooldown = genome ? 8 / genome.fertility : 10;
+    this.reproCooldown = genome ? (8 + genome.carnivory * 14) / genome.fertility : 10;
     this.mateSearch = 0;
     this.attackCooldown = 0;
     this.wanderAngle = this.heading;
@@ -2892,6 +4270,11 @@ class Creature {
     this.flockY = 0;
     this.sepX = 0;
     this.sepY = 0;
+
+    // Cité de rattachement (peuples conscients), mise à jour par la couche
+    // civilisationnelle. Un villageois s'éloigne peu de chez lui.
+    this.settlement = null;
+    this.sapient = false;
 
     // Chantier en cours (espèces bâtisseuses)
     this.buildTarget = null;
@@ -2938,6 +4321,31 @@ class Creature {
       g.limbs * 0.022;
 
     this.isBuilder = g.builder > BUILDER_THRESHOLD;
+
+    // L'intelligence se paie avant de rapporter : elle améliore la récolte
+    // et la conduite du corps, mais un cerveau consomme en permanence. C'est
+    // ce compromis qui la maintient basse tant que rien ne la récompense —
+    // et qui la fait décoller dès qu'une colonie lui donne prise.
+    // Trois bénéfices modestes plutôt qu'un seul décisif : mieux récolter,
+    // mieux se déplacer, mieux voir venir. Un cerveau coûte en permanence,
+    // mais il paie dans assez de situations pour que la sélection le pousse —
+    // sans quoi aucune lignée n'atteindrait jamais le seuil de conscience.
+    this.forageSkill = 0.72 + g.intellect * 0.75;
+    this.moveEfficiency = 1 - g.intellect * 0.16;
+    this.upkeep += g.intellect * 0.1;
+  }
+
+  /**
+   * Protection offerte par la cité : gardes, enceintes, simple nombre.
+   * C'est le mécanisme par lequel une civilisation échappe au cycle
+   * proie-prédateur qui gouverne le reste du vivant — non par décret, mais
+   * parce qu'un prédateur préfère une proie isolée à une proie entourée.
+   */
+  get shelter() {
+    const s = this.settlement;
+    if (!s || s.abandoned) return 0;
+    const walls = s.buildings.wall || 0;
+    return clamp01(0.2 + s.population / 160 + walls * 0.06);
   }
 
   get isAdult() {
@@ -2960,6 +4368,7 @@ class Creature {
       this.isAdult &&
       this.reproCooldown <= 0 &&
       this.energy > this.maxEnergy * 0.6 &&
+      this.condition > 0.6 &&
       this.age < this.lifespan * 0.88
     );
   }
@@ -3011,9 +4420,10 @@ class Creature {
       }
 
       // Proie : plus petite, et pas de ma propre espèce. Une carapace épaisse
-      // dissuade : le prédateur préfère une cible plus tendre.
+      // dissuade — et une cité peuplée encore davantage.
       if (canHunt && !sameSpecies && seen <= r2 && o.genome.size < g.size * 1.12) {
-        const gain = (seen * (1 + o.genome.armor * 1.4 + o.genome.horns * 0.9)) / (0.4 + o.genome.size);
+        const gain = (seen * (1 + o.genome.armor * 1.4 + o.genome.horns * 0.9 + o.shelter * 3))
+          / (0.4 + o.genome.size);
         if (gain < bestPrey) { bestPrey = gain; this.prey = o; }
       }
 
@@ -3168,6 +4578,20 @@ class Creature {
       }
     }
 
+    // 4 ter. Attachement au territoire. Un habitant qui sort des limites de
+    // sa cité est rappelé vers elle : c'est ce qui fait qu'une cité se *voit*
+    // comme un lieu, au lieu d'une espèce diluée sur la carte.
+    if (this.settlement && !this.threat) {
+      const sx = this.settlement.x - this.x, sy = this.settlement.y - this.y;
+      const d = Math.sqrt(sx * sx + sy * sy);
+      const r = this.settlement.radius;
+      if (d > r * 0.75) {
+        const w = 1.5 * clamp01((d - r * 0.75) / r);
+        dx += (sx / d) * w;
+        dy += (sy / d) * w;
+      }
+    }
+
     // 5. Grégarisme (cohésion douce entre congénères).
     if (g.sociability > 0.15 && (this.flockX || this.flockY)) {
       const d = Math.sqrt(this.flockX * this.flockX + this.flockY * this.flockY) || 1;
@@ -3287,15 +4711,17 @@ class Creature {
       g.metabolism *
       (0.5 * Math.pow(g.size, 1.55) +
         0.0013 * g.vision * Math.sqrt(g.size) +
-        1.15 * v * v * Math.pow(g.size, 1.25) +
+        1.15 * v * v * Math.pow(g.size, 1.25) * this.moveEfficiency +
         cold * 0.9 * insulation +
         this.upkeep) *
       dt;
     this.energy -= cost;
+    // Inertie nutritionnelle : environ trente secondes de mémoire.
+    this.condition += (this.energy / this.maxEnergy - this.condition) * Math.min(1, dt / 30);
 
     // --- alimentation végétale
     if (this.plantEfficiency > 0.12 && this.energy < this.maxEnergy * 0.985) {
-      const rate = 0.5 * Math.pow(g.size, 1.15) * this.plantEfficiency * dt;
+      const rate = 0.5 * Math.pow(g.size, 1.15) * this.plantEfficiency * this.forageSkill * dt;
       const gained = env.food.consume(this.x, this.y, rate);
       if (gained > 0) {
         this.energy = Math.min(this.maxEnergy, this.energy + gained * this.plantEfficiency);
@@ -3316,7 +4742,7 @@ class Creature {
 
     // --- vie de colonie : grenier puis chantier
     if ((env.tick + this.id) % 6 === 0) env.ecosystem.useNest(this, dt * 6);
-    if (this.isBuilder) this._build(dt, env);
+    if (this.isBuilder || this.sapient) this._build(dt, env);
 
     // --- charognage
     if (g.carnivory > 0.3 && this.energy < this.maxEnergy * 0.9) {
@@ -3398,7 +4824,7 @@ class Creature {
       * Math.pow(g.size / prey.genome.size, 0.8);
     // La carapace encaisse une part des dégâts, qui est perdue pour tout le
     // monde : le prédateur peine, la proie survit.
-    const dmg = Math.min(prey.energy, power * dt * prey.damageResist);
+    const dmg = Math.min(prey.energy, power * dt * prey.damageResist * (1 - prey.shelter));
     prey.energy -= dmg;
     prey.flash = 1;
     prey.threat = this;
@@ -3658,8 +5084,8 @@ const DEFAULT_OPTIONS = {
   // seuil à partir duquel la reproduction se raréfie, et plage sur laquelle
   // elle devient quasi impossible.
   maxStructures: 420,
-  crowdingSoft: 1.3,
-  crowdingRange: 2.4,
+  crowdingSoft: 1.05,
+  crowdingRange: 2.0,
   dayLength: 60,
   daysPerSeason: 4,
   statsInterval: 1,
@@ -3693,6 +5119,9 @@ class Ecosystem {
     });
 
     this.structures = new Structures(this.terrain, this.soil);
+    this.peoples = new PeopleRegistry();
+    this.chronicle = new Chronicle();
+    this.civ = new Civilisations(this);
     this.grid = new SpatialHash(this.terrain.width, this.terrain.height, 128);
     this.corpseGrid = new SpatialHash(this.terrain.width, this.terrain.height, 160);
 
@@ -3758,7 +5187,7 @@ class Ecosystem {
       default: [
         { count: 84, carnivory: 0.05 },
         { count: 48, carnivory: 0.18 },
-        { count: 34, carnivory: 0.08, traits: { builder: 0.78, sociability: 0.85, limbs: 2.4, fertility: 0.9 } },
+        { count: 34, carnivory: 0.08, traits: { builder: 0.78, sociability: 0.85, limbs: 2.4, fertility: 0.9, intellect: 0.4 } },
         { count: 26, carnivory: 0.82 },
       ],
       abundance: [
@@ -3773,8 +5202,8 @@ class Ecosystem {
         { count: 40, carnivory: 0.9 },
       ],
       civilisations: [
-        { count: 60, carnivory: 0.06, traits: { builder: 0.82, sociability: 0.9, limbs: 2.6 } },
-        { count: 60, carnivory: 0.35, traits: { builder: 0.7, sociability: 0.75, armor: 0.35 } },
+        { count: 60, carnivory: 0.06, traits: { builder: 0.82, sociability: 0.9, limbs: 2.6, intellect: 0.52 } },
+        { count: 60, carnivory: 0.35, traits: { builder: 0.7, sociability: 0.75, armor: 0.35, intellect: 0.47 } },
         { count: 50, carnivory: 0.05, traits: { fins: 0.75, elongation: 1.7, limbs: 0.4 } },
         { count: 28, carnivory: 0.85, traits: { horns: 0.4 } },
       ],
@@ -3882,6 +5311,7 @@ class Ecosystem {
     this.food.update(dt, this.climate);
     this.soil.update(dt, this.food);
     this.structures.update(dt, this.species);
+    this.civ.update(dt, this.time);
 
     const creatures = this.creatures;
     this.grid.build(creatures);
@@ -3909,6 +5339,7 @@ class Ecosystem {
     this._pruneTimer += dt;
     if (this._pruneTimer > 30) {
       this.species.prune(this.time);
+      for (const sp of this.species.list) this.civ.checkAwakening(sp, this.time);
       this._rescueGuilds();
       this._pruneTimer = 0;
     }
@@ -3972,19 +5403,35 @@ class Ecosystem {
     const asexual = !parentB;
     const fert = parentA.genome.fertility * (parentB ? parentB.genome.fertility : 0.8);
     let litter = 1;
-    if (fert > 1.1) litter = 2;
-    if (fert > 1.9 && this.rng.chance(0.5)) litter = 3;
+    // Les grands carnivores n'ont pas de portées nombreuses.
+    const solitary = parentA.genome.carnivory > 0.6;
+    if (fert > 1.1 && !solitary) litter = 2;
+    if (fert > 1.9 && !solitary && this.rng.chance(0.5)) litter = 3;
     litter = Math.min(litter, budget);
     if (litter <= 0) return 0;
 
     // Une portée nombreuse coûte plus cher, sans être proportionnelle :
     // il reste avantageux d'être fertile, mais pas gratuitement.
-    parentA.energy -= parentA.breedingCost(asexual) * (0.7 + 0.3 * litter);
-    parentA.reproCooldown = 14 / parentA.genome.fertility;
+    //
+    // Les parents intelligents élèvent à moindre frais — abri, choix du site,
+    // savoir transmis. C'est le seul avantage de l'intelligence qui joue
+    // *dans l'abondance* : améliorer la récolte ne sert à rien quand tout le
+    // monde est repu, alors qu'élever moins cher paie exactement au moment
+    // où la population croît. Sans cela, le gène ne monte que pendant les
+    // famines — c'est-à-dire au moment où la lignée disparaît.
+    const care = 1 - parentA.genome.intellect * 0.3;
+    parentA.energy -= parentA.breedingCost(asexual) * (0.7 + 0.3 * litter) * care;
+    // L'intelligence raccourcit l'intervalle entre deux portées : soins,
+    // abri, sevrage plus sûr. C'est le seul avantage qui morde dans un monde
+    // saturé en énergie — là où plus personne n'a faim, c'est la cadence de
+    // reproduction qui décide, pas les calories.
+    parentA.reproCooldown = (14 + parentA.genome.carnivory * 26)
+      / parentA.genome.fertility * (1 - parentA.genome.intellect * 0.45);
     parentA.mateSearch = 0;
     if (parentB) {
       parentB.energy -= parentB.breedingCost(false) * 0.8;
-      parentB.reproCooldown = 14 / parentB.genome.fertility;
+      parentB.reproCooldown = (14 + parentB.genome.carnivory * 26)
+        / parentB.genome.fertility * (1 - parentB.genome.intellect * 0.45);
       parentB.mateSearch = 0;
       parentB.mate = null;
     }
@@ -4010,7 +5457,7 @@ class Ecosystem {
         energy: null,
         generation,
       });
-      child.energy = child.maxEnergy * 0.45;
+      child.energy = child.maxEnergy * (0.42 + genome.intellect * 0.2);
       child.reproCooldown = child.maturity * 0.5;
       this.creatures.push(child);
       species.count++;
@@ -4112,9 +5559,10 @@ class Ecosystem {
     if (this.structures.countForSpecies(sp.id) > Math.max(2, sp.count / 3)) return null;
     // Un nid pour quarante individus : une espèce prospère essaime, elle ne
     // pique pas un hameau à chaque fois qu'un bâtisseur s'écarte du groupe.
-    const site = this.structures.findSite(creature, sp, this.rng, this.time);
-    if (site && site.kind === KIND.NEST &&
-        this.structures.nestCountFor(sp.id) > 1 + sp.count / 40) {
+    const site = this.structures.findSite(creature, sp, this.rng, this.time, this.civ);
+    const sapient = !!this.peoples.get(sp.id);
+    const nestQuota = sapient ? 1 + sp.count / 26 : 1 + sp.count / 40;
+    if (site && site.kind === KIND.NEST && this.structures.nestCountFor(sp.id) > nestQuota) {
       this.structures.abandon(site);
       return null;
     }
@@ -4128,7 +5576,7 @@ class Ecosystem {
    */
   useNest(creature, dt) {
     if (this.structures.nests.length === 0) return;
-    const reach = this.terrain.cellSize * 5;
+    const reach = this.terrain.cellSize * 12;   // la culture rayonne sur la colonie
     const nest = this.structures.nearestNest(creature.x, creature.y, creature.speciesId, reach);
     if (nest) this.structures.trade(nest, creature, dt);
   }
@@ -4138,15 +5586,17 @@ class Ecosystem {
     const finished = this.structures.invest(structure, amount, this.time);
     if (!finished) return;
     creature.buildTarget = null;
-    const info = STRUCTURE_INFO[structure.kind];
     this.emit('build', structure.x, structure.y, creature);
-    const sp = this.species.get(structure.speciesId);
-    if (structure.kind !== KIND.FIELD && sp) {
-      this.notices.push({
-        type: 'build',
-        text: `${sp.name} achève ${info.name === 'Nid' ? 'un nid' : 'une digue'}`,
-        time: this.time,
-      });
+
+    const people = this.peoples.get(structure.speciesId);
+    if (structure.kind === KIND.NEST && people && !structure.settlementId) {
+      // Un foyer achevé par un peuple conscient devient une cité.
+      this.civ.found(structure, people, this.time);
+      return;
+    }
+    if (structure.settlementId) {
+      const settlement = this.civ.byId.get(structure.settlementId);
+      if (settlement) settlement.register(structure);
     }
   }
 
@@ -4237,6 +5687,7 @@ class Ecosystem {
     for (const sp of this.species.list) {
       sp.count = 0;
       sp._age = 0; sp._speed = 0; sp._size = 0; sp._vision = 0; sp._energy = 0;
+      sp._intellect = 0; sp._builder = 0; sp._social = 0;
     }
 
     let age = 0, speed = 0, size = 0, vision = 0, lifespan = 0;
@@ -4265,6 +5716,9 @@ class Ecosystem {
         sp._size += g.size;
         sp._vision += g.vision;
         sp._energy += c.energy / c.maxEnergy;
+        sp._intellect += g.intellect;
+        sp._builder += g.builder;
+        sp._social += g.sociability;
       }
     }
 
@@ -4299,6 +5753,12 @@ class Ecosystem {
         sp.avgSize = sp._size / sp.count;
         sp.avgVision = sp._vision / sp.count;
         sp.avgEnergy = sp._energy / sp.count;
+        // Moyennes vivantes : c'est sur elles, et non sur l'archétype figé à
+        // la naissance de l'espèce, que se juge le franchissement du seuil de
+        // conscience. Sans quoi aucune lignée ne pourrait *devenir* un peuple.
+        sp.avgIntellect = sp._intellect / sp.count;
+        sp.avgBuilder = sp._builder / sp.count;
+        sp.avgSocial = sp._social / sp.count;
         if (sp.count > sp.peak) sp.peak = sp.count;
       }
       sp.history.push(sp.count);
@@ -5600,6 +7060,7 @@ class Renderer {
 
     if (this.options.vegetation) this._drawVegetation(ctx, dt, climate);
     this._drawWater(ctx, bounds, camera);
+    this._drawTerritories(ctx, bounds, camera);
     this._drawStructures(ctx, bounds, camera);
     this._drawCorpses(ctx, bounds, camera);
     this._drawCreatures(ctx, bounds, camera, climate);
@@ -5612,6 +7073,7 @@ class Renderer {
     if (this.options.dayNight) this._drawDayNight(ctx, climate);
     if (this.options.weather) this._drawWeather(ctx, climate, dt, camera);
     this._drawVignette(ctx);
+    this._drawSettlementLabels(ctx, camera);
     if (this.options.minimap) this._drawMinimap(ctx, camera);
     this._drawSelectionOverlay(ctx, camera);
 
@@ -5709,6 +7171,91 @@ class Renderer {
     this._minimapStale = true;
   }
 
+  /**
+   * Territoires et routes commerciales. Dessinés sous les bâtiments : une
+   * cité doit se lire comme une tache d'influence sur la carte, pas comme un
+   * amas d'icônes.
+   */
+  _drawTerritories(ctx, bounds, camera) {
+    const civ = this.eco.civ;
+    if (!civ || !civ.list.length) return;
+    const zoom = camera.zoom;
+    ctx.save();
+
+    // Routes commerciales
+    ctx.lineWidth = Math.max(0.8, 1.6 / zoom);
+    ctx.setLineDash([7, 6]);
+    for (const a of civ.list) {
+      if (a.abandoned) continue;
+      for (const [id, strength] of a.routes) {
+        if (id <= a.id) continue;
+        const b = civ.byId.get(id);
+        if (!b || b.abandoned) continue;
+        ctx.strokeStyle = `hsla(${a.hue} 60% 70% / ${(0.12 + strength * 0.35).toFixed(2)})`;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+
+    // Territoires
+    for (const s of civ.list) {
+      if (s.x < bounds.minX - s.radius || s.x > bounds.maxX + s.radius) continue;
+      if (s.y < bounds.minY - s.radius || s.y > bounds.maxY + s.radius) continue;
+      const ruined = s.abandoned;
+      const hue = ruined ? 220 : s.hue;
+      const grd = ctx.createRadialGradient(s.x, s.y, s.radius * 0.2, s.x, s.y, s.radius);
+      grd.addColorStop(0, `hsla(${hue} ${ruined ? 8 : 62}% 60% / ${ruined ? 0.05 : 0.11})`);
+      grd.addColorStop(1, 'hsla(0 0% 0% / 0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius, 0, TAU);
+      ctx.fill();
+
+      ctx.strokeStyle = `hsla(${hue} ${ruined ? 10 : 65}% 68% / ${ruined ? 0.18 : 0.4})`;
+      ctx.lineWidth = Math.max(0.7, 1.4 / zoom);
+      ctx.setLineDash(ruined ? [3, 7] : [10, 7]);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
+  /** Noms et rangs des cités, en espace écran pour rester lisibles. */
+  _drawSettlementLabels(ctx, camera) {
+    const civ = this.eco.civ;
+    if (!civ || !civ.list.length || camera.zoom < 0.32) return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const s of civ.list) {
+      if (s.abandoned && camera.zoom < 0.7) continue;
+      const p = camera.worldToScreen(s.x, s.y);
+      if (p.x < -80 || p.x > this.width + 80 || p.y < -40 || p.y > this.height + 40) continue;
+      const y = p.y - Math.max(16, s.radius * camera.zoom * 0.55);
+
+      const label = s.abandoned ? `${s.name} · ruines` : s.name;
+      ctx.font = `600 ${s.tier >= 3 ? 13 : 11}px ui-sans-serif, system-ui, sans-serif`;
+      const w = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(8, 12, 20, 0.62)';
+      roundRect(ctx, p.x - w / 2 - 7, y - 10, w + 14, 20, 6);
+      ctx.fill();
+      ctx.fillStyle = s.abandoned ? 'rgba(180,190,205,0.7)' : `hsl(${s.hue} 70% 78%)`;
+      ctx.fillText(label, p.x, y);
+
+      if (!s.abandoned && camera.zoom > 0.55) {
+        ctx.font = '9px ui-sans-serif, system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(200, 212, 228, 0.66)';
+        ctx.fillText(`${s.tierInfo.name} · ${s.population} hab · ${s.techs.size} savoirs`, p.x, y + 15);
+      }
+    }
+    ctx.restore();
+  }
+
   _drawStructures(ctx, bounds, camera) {
     const list = this.eco.structures.list;
     if (!list.length) return;
@@ -5769,6 +7316,46 @@ class Renderer {
             for (let k = 0; k < 3; k++) {
               ctx.fillRect(s.cx * cs + 2 + (k % 2) * 5, s.cy * cs + 3 + k * 4, 6, 3);
             }
+          }
+          break;
+        }
+        case KIND.ROAD: {
+          ctx.fillStyle = 'rgba(186, 172, 148, 0.55)';
+          ctx.fillRect(s.cx * cs + 2, s.cy * cs + 2, cs - 4, cs - 4);
+          break;
+        }
+        case KIND.WALL: {
+          ctx.fillStyle = 'rgba(158, 158, 166, 0.92)';
+          ctx.fillRect(s.cx * cs + 1, s.cy * cs + 1, cs - 2, cs - 2);
+          ctx.fillStyle = 'rgba(96, 96, 104, 0.9)';
+          ctx.fillRect(s.cx * cs + 1, s.cy * cs + cs * 0.55, cs - 2, 2);
+          break;
+        }
+        case KIND.HUT:
+        case KIND.GRANARY:
+        case KIND.WORKSHOP:
+        case KIND.MARKET:
+        case KIND.TEMPLE:
+        case KIND.PORT:
+        case KIND.MINE: {
+          // Bâti : une empreinte au sol, un toit teinté du peuple, une ombre.
+          const col = info.color;
+          const bx = s.cx * cs, by = s.cy * cs;
+          ctx.fillStyle = 'rgba(10, 14, 20, 0.3)';
+          ctx.fillRect(bx + 4, by + 5, cs - 5, cs - 6);
+          ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+          ctx.fillRect(bx + 2, by + 3, cs - 5, cs - 6);
+          ctx.fillStyle = `hsl(${s.hue} 45% 52%)`;
+          ctx.beginPath();
+          ctx.moveTo(bx + 1, by + 5);
+          ctx.lineTo(bx + cs * 0.5, by + 1);
+          ctx.lineTo(bx + cs - 3, by + 5);
+          ctx.closePath();
+          ctx.fill();
+          if (zoom > 1.1 && s.capacity > 0 && s.store > 1) {
+            const fill = Math.min(1, s.store / s.capacity);
+            ctx.fillStyle = `rgba(255, 214, 120, 0.8)`;
+            ctx.fillRect(bx + 2, by + cs - 3, (cs - 5) * fill, 1.6);
           }
           break;
         }
@@ -7844,6 +9431,194 @@ class Inspector {
   }
 }
 
+// ── src/ui/civpanel.js ────────────────────────────────────────────
+/**
+ * Panneaux « Peuples » et « Chronique ».
+ *
+ * La chronique est la seule narration du projet : elle n'invente rien, elle
+ * restitue les événements que la simulation a produits. C'est ce qui permet
+ * de lire après coup l'histoire d'une partie — et de constater que deux
+ * graines n'en racontent jamais la même.
+ */
+
+const KIND_COLORS = {
+  sapience: '#9b8cff', founding: '#7ef0d0', tech: '#8fd0ff', era: '#ffd06e',
+  trade: '#e0a458', growth: '#7ef0a0', famine: '#c9a227', raid: '#ef6461',
+  collapse: '#94a3b8', schism: '#c58cff', extinction: '#64748b', nature: '#68c98a',
+};
+
+class CivPanel {
+  constructor(deps) {
+    this.deps = deps;
+    this.tabs = [...document.querySelectorAll('.tab')];
+    this.panels = new Map();
+    for (const t of this.tabs) {
+      this.panels.set(t.dataset.tab, document.querySelector(`#${t.dataset.tab}`));
+      t.addEventListener('click', () => this.select(t.dataset.tab));
+    }
+    this.active = 'tabSpecies';
+
+    this.el = {
+      peopleCount: document.querySelector('#peopleCount'),
+      settlements: document.querySelector('#civSettlements'),
+      population: document.querySelector('#civPopulation'),
+      techs: document.querySelector('#civTechs'),
+      ruins: document.querySelector('#civRuins'),
+      era: document.querySelector('#civEra'),
+      peopleList: document.querySelector('#peopleList'),
+      chronicle: document.querySelector('#chronicleList'),
+      filters: document.querySelector('#chronicleFilters'),
+    };
+
+    this.hidden = new Set();
+    this._buildFilters();
+    this._acc = 0;
+    this._lastEntry = 0;
+  }
+
+  select(id) {
+    this.active = id;
+    for (const t of this.tabs) t.classList.toggle('active', t.dataset.tab === id);
+    for (const [key, panel] of this.panels) panel.classList.toggle('hidden', key !== id);
+    // Un onglet qu'on vient d'ouvrir doit être à jour immédiatement.
+    this._acc = 99;
+  }
+
+  _buildFilters() {
+    for (const [key, info] of Object.entries(CHRONICLE_KINDS)) {
+      const b = document.createElement('button');
+      b.textContent = `${info.icon} ${info.label}`;
+      b.title = `Afficher ou masquer : ${info.label}`;
+      b.addEventListener('click', () => {
+        if (this.hidden.has(key)) this.hidden.delete(key);
+        else this.hidden.add(key);
+        b.classList.toggle('off', this.hidden.has(key));
+        this._lastEntry = -1;
+        this._renderChronicle(this.deps.getEco());
+      });
+      this.el.filters.appendChild(b);
+    }
+  }
+
+  update(eco, dt) {
+    this._acc += dt;
+    if (this._acc < 0.6) return;
+    this._acc = 0;
+
+    const c = eco.civ.stats;
+    this.el.peopleCount.textContent = c.peoples;
+    if (this.active === 'tabCiv') this._renderPeoples(eco, c);
+    else if (this.active === 'tabChronicle') this._renderChronicle(eco);
+  }
+
+  _renderPeoples(eco, c) {
+    this.el.settlements.textContent = c.settlements;
+    this.el.population.textContent = c.population;
+    this.el.techs.textContent = c.techs;
+    this.el.ruins.textContent = c.ruins;
+
+    const peoples = eco.peoples.list;
+    if (!peoples.length) {
+      this.el.era.textContent = 'Aucune conscience n\'a encore émergé.';
+    } else {
+      const era = ERAS[c.era];
+      this.el.era.textContent = c.settlements
+        ? `${era.name} — ${c.peoples} peuple(s) vivant(s), ${c.routes} route(s) commerciale(s).`
+        : 'Les peuples n\'ont plus de cité debout.';
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const p of [...peoples].reverse()) {
+      const alive = p.endedAt === null;
+      const cities = p.settlements.filter((s) => !s.abandoned);
+      const card = document.createElement('div');
+      card.className = `people-card${alive ? '' : ' gone'}`;
+      card.style.setProperty('--sp-color', `hsl(${Math.round(p.hue)} 62% 62%)`);
+
+      const pop = cities.reduce((a, s) => a + s.population, 0);
+      const era = cities.length ? Math.max(...cities.map((s) => s.era)) : 0;
+      const techs = [...p.knownTechs].slice(-6);
+
+      card.innerHTML = `
+        <div class="pc-top">
+          <span class="pc-name"></span>
+          <span class="pc-era"></span>
+        </div>
+        <div class="pc-meta"></div>
+        <div class="pc-cities"></div>
+        <div class="pc-techs"></div>`;
+      card.querySelector('.pc-name').textContent = p.name;
+      card.querySelector('.pc-era').textContent = alive ? ERAS[era].name : 'disparu';
+      card.querySelector('.pc-meta').textContent =
+        `${p.characterLabel} · ${pop} citadins · ${cities.length} cité(s) · apogée ${p.peakPopulation} · ${p.knownTechs.size} savoirs`;
+
+      const cityBox = card.querySelector('.pc-cities');
+      for (const s of p.settlements.slice(-8)) {
+        const chip = document.createElement('button');
+        chip.className = `pc-city${s.abandoned ? ' ruin' : ''}`;
+        chip.textContent = `${s.name} · ${s.abandoned ? 'ruines' : s.population}`;
+        chip.addEventListener('click', () => this.deps.focusPoint(s.x, s.y));
+        cityBox.appendChild(chip);
+      }
+
+      const techBox = card.querySelector('.pc-techs');
+      for (const id of techs) {
+        const t = TECH_MAP.get(id);
+        if (!t) continue;
+        const chip = document.createElement('span');
+        chip.className = 'pc-tech';
+        chip.textContent = t.name;
+        techBox.appendChild(chip);
+      }
+      frag.appendChild(card);
+    }
+    this.el.peopleList.replaceChildren(frag);
+  }
+
+  _renderChronicle(eco) {
+    const entries = eco.chronicle.entries;
+    const last = entries.length ? entries[entries.length - 1].id : 0;
+    if (last === this._lastEntry) return;
+    this._lastEntry = last;
+
+    const kinds = this.hidden.size
+      ? new Set(Object.keys(CHRONICLE_KINDS).filter((k) => !this.hidden.has(k)))
+      : null;
+    const list = eco.chronicle.latest(70, kinds);
+
+    if (!list.length) {
+      this.el.chronicle.innerHTML =
+        '<p class="hint">Rien n\'est encore arrivé qui mérite d\'être écrit.</p>';
+      return;
+    }
+
+    const dayLength = eco.climate.dayLength;
+    const frag = document.createDocumentFragment();
+    for (const e of list) {
+      const info = CHRONICLE_KINDS[e.kind] || CHRONICLE_KINDS.nature;
+      const el = document.createElement('div');
+      el.className = 'chron-entry';
+      el.style.setProperty('--c', KIND_COLORS[e.kind] || '#64748b');
+      el.innerHTML = '<span class="chron-icon"></span><span class="chron-text"></span>';
+      el.querySelector('.chron-icon').textContent = info.icon;
+      const text = el.querySelector('.chron-text');
+      text.textContent = e.text;
+      const time = document.createElement('span');
+      time.className = 'chron-time';
+      time.textContent = `Jour ${Math.floor(e.time / dayLength)}`;
+      text.appendChild(time);
+      if (e.x !== null) {
+        el.title = 'Aller voir sur la carte';
+        el.addEventListener('click', () => this.deps.focusPoint(e.x, e.y));
+      } else {
+        el.style.cursor = 'default';
+      }
+      frag.appendChild(el);
+    }
+    this.el.chronicle.replaceChildren(frag);
+  }
+}
+
 // ── src/main.js ───────────────────────────────────────────────────
 /**
  * Genesis — point d'entrée.
@@ -7954,6 +9729,10 @@ async function boot() {
     closeModal: () => app.controls.closeModal(),
     onChanged: () => app.controls.syncSettings(),
   });
+  app.civPanel = new CivPanel({
+    getEco: () => app.eco,
+    focusPoint: (x, y) => app.focusPoint(x, y),
+  });
   app.controls = new Controls(app);
 
   if (saved.panelsHidden) document.body.classList.add('panels-hidden');
@@ -8053,11 +9832,23 @@ function loop(now) {
     paused: app.paused,
   }, realDt);
   app.speciesPanel.update(app.eco, realDt);
+  app.civPanel.update(app.eco, realDt);
   app.speciesPanel.renderPreview(app.time);
   app.inspector.update(realDt, app.time);
 }
 
 function drainNotices(eco) {
+  // La chronique remonte ses événements marquants en notification : c'est
+  // ainsi qu'on apprend qu'une civilisation vient de naître ou de tomber
+  // sans avoir les yeux rivés sur le panneau.
+  for (const e of eco.chronicle.drainPending(2)) {
+    const type = e.kind === 'raid' || e.kind === 'famine' ? 'danger'
+      : e.kind === 'collapse' || e.kind === 'extinction' ? 'warn'
+      : e.kind === 'sapience' || e.kind === 'era' || e.kind === 'schism' ? 'speciation'
+      : 'success';
+    toast(e.text, type, 5200);
+  }
+
   const notices = eco.drainNotices();
   for (const n of notices) {
     if (n.type === 'speciation') toast(n.text, 'speciation', 4200);
@@ -8108,6 +9899,15 @@ app.toggleFollow = () => {
     app.camera.targetZoom = Math.max(app.camera.targetZoom, 1.6);
     toast('Suivi activé');
   }
+};
+
+/** Centre la caméra sur un point du monde (chronique, liste des cités). */
+app.focusPoint = (x, y) => {
+  if (x === null || y === null) return;
+  app.camera.follow = null;
+  app.camera.x = x;
+  app.camera.y = y;
+  app.camera.targetZoom = Math.max(app.camera.targetZoom, 1.1);
 };
 
 app.focusSpecies = (id) => {

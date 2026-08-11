@@ -11,6 +11,9 @@ import { Food } from '../world/food.js';
 import { Climate } from '../world/climate.js';
 import { Soil } from '../world/soil.js';
 import { Structures, KIND, STRUCTURE_INFO } from './structures.js';
+import { PeopleRegistry } from './culture.js';
+import { Civilisations, resetSettlementIds } from './settlement.js';
+import { Chronicle } from './chronicle.js';
 import { SpatialHash } from './spatialhash.js';
 import { Creature, resetCreatureIds } from './creature.js';
 import { SpeciesRegistry } from './species.js';
@@ -37,8 +40,8 @@ export const DEFAULT_OPTIONS = {
   // seuil à partir duquel la reproduction se raréfie, et plage sur laquelle
   // elle devient quasi impossible.
   maxStructures: 420,
-  crowdingSoft: 1.3,
-  crowdingRange: 2.4,
+  crowdingSoft: 1.05,
+  crowdingRange: 2.0,
   dayLength: 60,
   daysPerSeason: 4,
   statsInterval: 1,
@@ -72,6 +75,9 @@ export class Ecosystem {
     });
 
     this.structures = new Structures(this.terrain, this.soil);
+    this.peoples = new PeopleRegistry();
+    this.chronicle = new Chronicle();
+    this.civ = new Civilisations(this);
     this.grid = new SpatialHash(this.terrain.width, this.terrain.height, 128);
     this.corpseGrid = new SpatialHash(this.terrain.width, this.terrain.height, 160);
 
@@ -137,7 +143,7 @@ export class Ecosystem {
       default: [
         { count: 84, carnivory: 0.05 },
         { count: 48, carnivory: 0.18 },
-        { count: 34, carnivory: 0.08, traits: { builder: 0.78, sociability: 0.85, limbs: 2.4, fertility: 0.9 } },
+        { count: 34, carnivory: 0.08, traits: { builder: 0.78, sociability: 0.85, limbs: 2.4, fertility: 0.9, intellect: 0.4 } },
         { count: 26, carnivory: 0.82 },
       ],
       abundance: [
@@ -152,8 +158,8 @@ export class Ecosystem {
         { count: 40, carnivory: 0.9 },
       ],
       civilisations: [
-        { count: 60, carnivory: 0.06, traits: { builder: 0.82, sociability: 0.9, limbs: 2.6 } },
-        { count: 60, carnivory: 0.35, traits: { builder: 0.7, sociability: 0.75, armor: 0.35 } },
+        { count: 60, carnivory: 0.06, traits: { builder: 0.82, sociability: 0.9, limbs: 2.6, intellect: 0.52 } },
+        { count: 60, carnivory: 0.35, traits: { builder: 0.7, sociability: 0.75, armor: 0.35, intellect: 0.47 } },
         { count: 50, carnivory: 0.05, traits: { fins: 0.75, elongation: 1.7, limbs: 0.4 } },
         { count: 28, carnivory: 0.85, traits: { horns: 0.4 } },
       ],
@@ -261,6 +267,7 @@ export class Ecosystem {
     this.food.update(dt, this.climate);
     this.soil.update(dt, this.food);
     this.structures.update(dt, this.species);
+    this.civ.update(dt, this.time);
 
     const creatures = this.creatures;
     this.grid.build(creatures);
@@ -288,6 +295,7 @@ export class Ecosystem {
     this._pruneTimer += dt;
     if (this._pruneTimer > 30) {
       this.species.prune(this.time);
+      for (const sp of this.species.list) this.civ.checkAwakening(sp, this.time);
       this._rescueGuilds();
       this._pruneTimer = 0;
     }
@@ -351,19 +359,35 @@ export class Ecosystem {
     const asexual = !parentB;
     const fert = parentA.genome.fertility * (parentB ? parentB.genome.fertility : 0.8);
     let litter = 1;
-    if (fert > 1.1) litter = 2;
-    if (fert > 1.9 && this.rng.chance(0.5)) litter = 3;
+    // Les grands carnivores n'ont pas de portées nombreuses.
+    const solitary = parentA.genome.carnivory > 0.6;
+    if (fert > 1.1 && !solitary) litter = 2;
+    if (fert > 1.9 && !solitary && this.rng.chance(0.5)) litter = 3;
     litter = Math.min(litter, budget);
     if (litter <= 0) return 0;
 
     // Une portée nombreuse coûte plus cher, sans être proportionnelle :
     // il reste avantageux d'être fertile, mais pas gratuitement.
-    parentA.energy -= parentA.breedingCost(asexual) * (0.7 + 0.3 * litter);
-    parentA.reproCooldown = 14 / parentA.genome.fertility;
+    //
+    // Les parents intelligents élèvent à moindre frais — abri, choix du site,
+    // savoir transmis. C'est le seul avantage de l'intelligence qui joue
+    // *dans l'abondance* : améliorer la récolte ne sert à rien quand tout le
+    // monde est repu, alors qu'élever moins cher paie exactement au moment
+    // où la population croît. Sans cela, le gène ne monte que pendant les
+    // famines — c'est-à-dire au moment où la lignée disparaît.
+    const care = 1 - parentA.genome.intellect * 0.3;
+    parentA.energy -= parentA.breedingCost(asexual) * (0.7 + 0.3 * litter) * care;
+    // L'intelligence raccourcit l'intervalle entre deux portées : soins,
+    // abri, sevrage plus sûr. C'est le seul avantage qui morde dans un monde
+    // saturé en énergie — là où plus personne n'a faim, c'est la cadence de
+    // reproduction qui décide, pas les calories.
+    parentA.reproCooldown = (14 + parentA.genome.carnivory * 26)
+      / parentA.genome.fertility * (1 - parentA.genome.intellect * 0.45);
     parentA.mateSearch = 0;
     if (parentB) {
       parentB.energy -= parentB.breedingCost(false) * 0.8;
-      parentB.reproCooldown = 14 / parentB.genome.fertility;
+      parentB.reproCooldown = (14 + parentB.genome.carnivory * 26)
+        / parentB.genome.fertility * (1 - parentB.genome.intellect * 0.45);
       parentB.mateSearch = 0;
       parentB.mate = null;
     }
@@ -389,7 +413,7 @@ export class Ecosystem {
         energy: null,
         generation,
       });
-      child.energy = child.maxEnergy * 0.45;
+      child.energy = child.maxEnergy * (0.42 + genome.intellect * 0.2);
       child.reproCooldown = child.maturity * 0.5;
       this.creatures.push(child);
       species.count++;
@@ -491,9 +515,10 @@ export class Ecosystem {
     if (this.structures.countForSpecies(sp.id) > Math.max(2, sp.count / 3)) return null;
     // Un nid pour quarante individus : une espèce prospère essaime, elle ne
     // pique pas un hameau à chaque fois qu'un bâtisseur s'écarte du groupe.
-    const site = this.structures.findSite(creature, sp, this.rng, this.time);
-    if (site && site.kind === KIND.NEST &&
-        this.structures.nestCountFor(sp.id) > 1 + sp.count / 40) {
+    const site = this.structures.findSite(creature, sp, this.rng, this.time, this.civ);
+    const sapient = !!this.peoples.get(sp.id);
+    const nestQuota = sapient ? 1 + sp.count / 26 : 1 + sp.count / 40;
+    if (site && site.kind === KIND.NEST && this.structures.nestCountFor(sp.id) > nestQuota) {
       this.structures.abandon(site);
       return null;
     }
@@ -507,7 +532,7 @@ export class Ecosystem {
    */
   useNest(creature, dt) {
     if (this.structures.nests.length === 0) return;
-    const reach = this.terrain.cellSize * 5;
+    const reach = this.terrain.cellSize * 12;   // la culture rayonne sur la colonie
     const nest = this.structures.nearestNest(creature.x, creature.y, creature.speciesId, reach);
     if (nest) this.structures.trade(nest, creature, dt);
   }
@@ -517,15 +542,17 @@ export class Ecosystem {
     const finished = this.structures.invest(structure, amount, this.time);
     if (!finished) return;
     creature.buildTarget = null;
-    const info = STRUCTURE_INFO[structure.kind];
     this.emit('build', structure.x, structure.y, creature);
-    const sp = this.species.get(structure.speciesId);
-    if (structure.kind !== KIND.FIELD && sp) {
-      this.notices.push({
-        type: 'build',
-        text: `${sp.name} achève ${info.name === 'Nid' ? 'un nid' : 'une digue'}`,
-        time: this.time,
-      });
+
+    const people = this.peoples.get(structure.speciesId);
+    if (structure.kind === KIND.NEST && people && !structure.settlementId) {
+      // Un foyer achevé par un peuple conscient devient une cité.
+      this.civ.found(structure, people, this.time);
+      return;
+    }
+    if (structure.settlementId) {
+      const settlement = this.civ.byId.get(structure.settlementId);
+      if (settlement) settlement.register(structure);
     }
   }
 
@@ -616,6 +643,7 @@ export class Ecosystem {
     for (const sp of this.species.list) {
       sp.count = 0;
       sp._age = 0; sp._speed = 0; sp._size = 0; sp._vision = 0; sp._energy = 0;
+      sp._intellect = 0; sp._builder = 0; sp._social = 0;
     }
 
     let age = 0, speed = 0, size = 0, vision = 0, lifespan = 0;
@@ -644,6 +672,9 @@ export class Ecosystem {
         sp._size += g.size;
         sp._vision += g.vision;
         sp._energy += c.energy / c.maxEnergy;
+        sp._intellect += g.intellect;
+        sp._builder += g.builder;
+        sp._social += g.sociability;
       }
     }
 
@@ -678,6 +709,12 @@ export class Ecosystem {
         sp.avgSize = sp._size / sp.count;
         sp.avgVision = sp._vision / sp.count;
         sp.avgEnergy = sp._energy / sp.count;
+        // Moyennes vivantes : c'est sur elles, et non sur l'archétype figé à
+        // la naissance de l'espèce, que se juge le franchissement du seuil de
+        // conscience. Sans quoi aucune lignée ne pourrait *devenir* un peuple.
+        sp.avgIntellect = sp._intellect / sp.count;
+        sp.avgBuilder = sp._builder / sp.count;
+        sp.avgSocial = sp._social / sp.count;
         if (sp.count > sp.peak) sp.peak = sp.count;
       }
       sp.history.push(sp.count);

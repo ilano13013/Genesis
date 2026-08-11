@@ -13,11 +13,12 @@ const SLICES = 8; // la grille entière est rafraîchie toutes les 8 étapes
 
 export class Food {
   /** @param {import('./terrain.js').Terrain} terrain */
-  constructor(terrain, rng, { energyPerUnit = 36, growthRate = 0.055 } = {}) {
+  constructor(terrain, rng, { energyPerUnit = 36, growthRate = 0.055, reserveRatio = 0.18 } = {}) {
     this.terrain = terrain;
     this.rng = rng;
     this.energyPerUnit = energyPerUnit;
     this.growthRate = growthRate;
+    this.reserveRatio = reserveRatio;
     this.plants = new Float32Array(terrain.count);
     this.slice = 0;
     this.totalBiomass = 0;
@@ -103,14 +104,22 @@ export class Food {
 
   /**
    * Broute une cellule. Retourne l'énergie effectivement obtenue.
+   *
+   * Une part de la plante est hors d'atteinte du pâturage — racines, rejets,
+   * pousses trop basses. Cette réserve est ce qui empêche l'écosystème de
+   * partir en oscillation de relaxation : sans elle, un troupeau nombreux
+   * rase une parcelle jusqu'au sol, la ressource s'effondre partout en même
+   * temps, et la population avec. Avec elle, la ration par tête diminue
+   * progressivement et la population sature au lieu de s'écrouler.
    * @param {number} amount quantité de densité demandée
    */
   consume(worldX, worldY, amount) {
     const i = this.terrain.indexAt(worldX, worldY);
-    const available = this.plants[i];
+    const reserve = this.terrain.fertility[i] * this.reserveRatio;
+    const available = this.plants[i] - reserve;
     if (available <= 0.001) return 0;
     const taken = available < amount ? available : amount;
-    this.plants[i] = available - taken;
+    this.plants[i] -= taken;
     return taken * this.energyPerUnit;
   }
 

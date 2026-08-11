@@ -149,15 +149,37 @@
 <!-- ─────────────────────────────── panneau espèces ──────────────────────── -->
 <aside class="panel panel-right glass" id="panelSpecies">
   <div class="panel-head">
-    <h2>Espèces <span class="count" id="speciesCount">0</span></h2>
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="tabSpecies" role="tab">Espèces <span class="count" id="speciesCount">0</span></button>
+      <button class="tab" data-tab="tabCiv" role="tab">Peuples <span class="count" id="peopleCount">0</span></button>
+      <button class="tab" data-tab="tabChronicle" role="tab">Chronique</button>
+    </div>
     <button class="icon-btn small" data-collapse="panelSpecies" title="Réduire">−</button>
   </div>
-  <div class="panel-body">
+
+  <div class="panel-body tab-panel" id="tabSpecies">
     <button class="btn primary block-btn" id="btnAddSpecies">
       <span>＋</span> Introduire une espèce
     </button>
     <div class="species-list" id="speciesList"></div>
     <p class="hint" id="extinctHint"></p>
+  </div>
+
+  <div class="panel-body tab-panel hidden" id="tabCiv">
+    <div class="stat-grid civ-grid">
+      <div class="stat"><span class="stat-label">Cités</span><span class="stat-value" id="civSettlements">0</span></div>
+      <div class="stat"><span class="stat-label">Citadins</span><span class="stat-value" id="civPopulation">0</span></div>
+      <div class="stat"><span class="stat-label">Savoirs</span><span class="stat-value" id="civTechs">0</span></div>
+      <div class="stat"><span class="stat-label">Ruines</span><span class="stat-value" id="civRuins">0</span></div>
+    </div>
+    <p class="era-band" id="civEra">Aucune conscience n'a encore émergé.</p>
+    <div class="people-list" id="peopleList"></div>
+    <p class="hint" id="civHint">Une espèce bâtisseuse, sociable et intelligente peut franchir le seuil de la conscience. Cela ne se produit pas à chaque partie.</p>
+  </div>
+
+  <div class="panel-body tab-panel hidden" id="tabChronicle">
+    <div class="chronicle-filters" id="chronicleFilters"></div>
+    <div class="chronicle" id="chronicleList"></div>
   </div>
 </aside>
 
@@ -291,9 +313,9 @@
       </div>
       <div class="field">
         <label for="setCrowding" title="Densité de congénères à partir de laquelle la reproduction se raréfie">
-          Densité tolérée <output id="outCrowding">1.30</output>
+          Densité tolérée <output id="outCrowding">1.05</output>
         </label>
-        <input type="range" id="setCrowding" min="40" max="400" value="130">
+        <input type="range" id="setCrowding" min="40" max="400" value="105">
       </div>
       <label class="switch"><input type="checkbox" id="setRepopulate" checked><span></span>Recolonisation automatique</label>
     </section>

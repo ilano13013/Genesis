@@ -10,6 +10,11 @@ crêtes et camouflages apparaissent quand l'environnement les récompense, et se
 voient à l'écran. Certaines lignées **bâtissent** — nids, champs, digues — et
 finissent par redessiner la carte elle-même.
 
+Et parfois, une de ces lignées franchit le **seuil de la conscience** : elle
+reçoit un nom, fonde des cités, découvre des techniques, ouvre des routes
+commerciales, se divise, guerroie et s'effondre. Le joueur n'intervient
+jamais — il regarde, et il lit la chronique.
+
 **HTML, CSS et JavaScript natifs. Aucun framework, aucune dépendance, aucune
 étape de compilation.**
 
@@ -157,13 +162,81 @@ proie/prédateur au lieu d'une monoculture.
 
 ---
 
+## Civilisations
+
+### L'éveil
+
+Aucun humain n'est placé dans le monde. Une espèce devient un **peuple** quand
+sa population vivante franchit *ensemble* trois seuils : intelligence,
+sociabilité et pulsion bâtisseuse. Le jugement porte sur les moyennes des
+individus vivants, jamais sur un archétype figé — c'est donc bien la sélection
+naturelle qui fabrique la conscience, ou qui échoue à le faire.
+
+L'intelligence est un compromis constant : elle améliore la récolte, la
+conduite du corps et la portée des sens, mais un cerveau consomme sans arrêt.
+Elle ne décolle que là où une colonie lui donne prise — autour d'un foyer, on
+apprend, et l'intervalle entre deux portées se raccourcit. Dans un monde
+d'abondance sans colonies, le gène régresse. **Certaines parties ne verront
+donc jamais de civilisation**, et c'est le comportement voulu.
+
+### Cités
+
+Une cité n'a pas de population abstraite : ses habitants sont les créatures
+réellement simulées présentes dans son territoire. Elle passe de campement à
+métropole selon leur nombre, et son rayon d'influence suit.
+
+Ce qui la fait vivre :
+
+| Mécanisme | Conséquence |
+|---|---|
+| Champs | versent leur récolte dans les greniers, indépendamment du cycle sauvage |
+| Greniers | les habitants y déposent leur surplus et y puisent en disette |
+| Nombre et murailles | les prédateurs évitent les proies entourées : la ville protège |
+| Ateliers, mines | matériaux, donc bâtiments |
+| Routes, marchés, ports | portée commerciale |
+
+C'est la rupture décisive avec le reste du vivant : une cité cesse de dépendre
+du cycle de la végétation, et peut traverser les crises qui déciment les
+espèces alentour.
+
+### Savoirs
+
+Dix-neuf techniques réparties en cinq âges, de la maîtrise du feu à la
+mécanique. Rien n'est programmé dans le temps : une cité accumule du savoir
+selon sa population, son intelligence moyenne, ses ateliers et ses partenaires
+commerciaux, puis découvre une technique **parmi celles que son état rend
+accessibles**. La navigation exige une côte, la métallurgie exige du minerai à
+portée, l'écriture exige vingt habitants. Une cité de montagne et une cité
+côtière ne suivront pas le même chemin.
+
+Les idées voyagent : le long d'une route commerciale, une cité peut apprendre
+d'une voisine — mais seulement ce qu'elle est en état de comprendre et
+d'utiliser.
+
+### Conflits et fins
+
+Un raid n'est jamais déclenché par un scénario. Il faut un voisin d'un autre
+peuple, des territoires qui se touchent, et la faim. Les pertes sont réelles :
+ce sont des habitants qui meurent, pas un compteur. Une cité vidée est
+abandonnée et devient des ruines, qui restent visibles sur la carte. Quand un
+peuple perd sa dernière cité, son histoire s'arrête.
+
+### La chronique
+
+Le simulateur ne raconte rien de lui-même : il enregistre. Éveils, fondations,
+découvertes, changements d'âge, routes ouvertes, famines, raids,
+effondrements, schismes — chaque entrée est datée, filtrable, et cliquable
+pour aller voir le lieu sur la carte.
+
+---
+
 ## Interface
 
 | Élément | Rôle |
 |---|---|
 | Bandeau supérieur | Jour et heure, saison, météo, température, luminosité, FPS et vitesse effective |
 | Panneau gauche | Population, espèces, âge moyen, ressources, courbes, régimes alimentaires, génome moyen, causes de mortalité |
-| Panneau droit | Liste vivante des espèces (effectif, régime, générations, courbe), introduction et retrait d'espèces |
+| Panneau droit | Trois onglets — **Espèces** (effectif, régime, courbe, introduction/retrait), **Peuples** (cités, savoirs, âges, caractère) et **Chronique** (le récit de la partie) |
 | Inspecteur | Fiche de la créature sélectionnée : portrait animé, énergie, âge, génome, état comportemental |
 | Dock | Lecture/pause, pas à pas, vitesse ×1 → ×1000, sauvegardes, nouveau monde, réglages, aide |
 | Minicarte | Vue d'ensemble, répartition des créatures par régime, cadre de la vue — cliquable |
@@ -251,8 +324,12 @@ src/
     climate.js             jour/nuit, saisons, météo, vent
     food.js                végétation en croissance logistique amortie
   sim/
-    genome.js              17 gènes, mutation, croisement, distance génétique
-    structures.js          nids, champs, digues ; colonies et greniers
+    genome.js              19 gènes, mutation, croisement, distance génétique
+    structures.js          douze ouvrages, du nid animal au port
+    culture.js             peuples : éveil, noms, caractère
+    settlement.js          cités : rangs, économie, savoir, commerce, conflits
+    tech.js                arbre des savoirs et conditions de découverte
+    chronicle.js           journal des événements du monde
     creature.js            perception, décision, déplacement, métabolisme
     species.js             registre des espèces et spéciation
     spatialhash.js         grille de partitionnement spatial
@@ -268,6 +345,7 @@ src/
     hud.js                 bandeau et panneau de statistiques
     charts.js              graphiques canvas (aires empilées, sparklines)
     speciespanel.js        liste des espèces et éditeur de création
+    civpanel.js            panneaux Peuples et Chronique
     inspector.js           fiche de la créature sélectionnée
     controls.js            dock, modales, clavier, souris, tactile
     toast.js               notifications
@@ -276,7 +354,7 @@ src/
 tools/
   bundle.mjs               repliage en un fichier HTML autonome
 tests/
-  simulation.test.mjs      21 tests headless du noyau
+  simulation.test.mjs      24 tests headless du noyau
 ```
 
 Le noyau de simulation (`src/sim`, `src/world`, `src/core`) ne touche jamais au
